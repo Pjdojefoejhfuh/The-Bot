@@ -1135,7 +1135,7 @@ function wrapCustomCipher(source: string): string {
     lines.push(`${_fn}()`);
   }
 
-  console.log(`[cipher] S-Box layer: ${srcBytes.length}+${prefixLen}pfx â†’ ${encoded.length} chars (${nFrags} frags, boot:v${bootVariant} env:v${envVariant} b64:v${b64Variant} dec:v${decryptVariant} exec:v${execVariant})`);
+  console.log(`[cipher] S-Box layer: ${srcBytes.length}+${prefixLen}pfx → ${encoded.length} chars (${nFrags} frags, boot:v${bootVariant} env:v${envVariant} b64:v${b64Variant} dec:v${decryptVariant} exec:v${execVariant})`);
   return lines.join("\n");
 }
 
@@ -1435,7 +1435,7 @@ function wrapNestedVM(source: string): string {
     L.push(`${fn}()`);
   }
 
-  console.log(`[nested] Multi-key(${nKeys}) + rot(${rotKey}) layer: ${srcBytes.length}+${prefixLen}pfx â†’ ${encoded.length} chars (${nAlphaFrags} alpha frags, ${nDataFrags} data frags)`);
+  console.log(`[nested] Multi-key(${nKeys}) + rot(${rotKey}) layer: ${srcBytes.length}+${prefixLen}pfx → ${encoded.length} chars (${nAlphaFrags} alpha frags, ${nDataFrags} data frags)`);
   return L.join("\n");
 }
 
@@ -1492,7 +1492,7 @@ function wrapStubVM(source: string): string {
 
   const expectedLen = srcBytes.length;
 
-  console.log(`[stub] LZSS: ${srcBytes.length} â†’ ${compressed.length} (${ratio}%) | enc:v${encVariant} | frags:${nFrags}`);
+  console.log(`[stub] LZSS: ${srcBytes.length} → ${compressed.length} (${ratio}%) | enc:v${encVariant} | frags:${nFrags}`);
   console.log(`[stub] Encoded: ${encoded.length} chars | ~${((encoded.length + 2500) / 1024).toFixed(0)}KB`);
 
   const n = (len = 4) => randomName(len);
@@ -3572,7 +3572,7 @@ export function generateVM(chunk: BytecodeChunk, options: VMGenOptions = {}): st
 
     const poolParts = pools.map(p => `{${p.join(",")}}`);
     poolsSerialized = `{${poolParts.join(",")}}`;
-    console.log(`[Â§69] String pools: ${pools.length} pools, ${pools.reduce((a, p) => a + p.length, 0)} total bytes`);
+    console.log(`[§69] String pools: ${pools.length} pools, ${pools.reduce((a, p) => a + p.length, 0)} total bytes`);
   }
 
   const dataK = serializeConstants(finalK, encodeStrings, xorKey, doLazyDecode ? false : doFragment, xorStep, doConstantFold, lazyBaseKey, lazyKeyPrime, doMutation);

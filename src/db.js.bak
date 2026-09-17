@@ -1,0 +1,130 @@
+﻿import Database from "better-sqlite3";
+import bcrypt from "bcrypt";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.join(__dirname, "..", "data");
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const db = new Database(path.join(DATA_DIR, "siteobfusque.db"));
+db.pragma("journal_mode = WAL");
+
+// ============================================================
+// SCHEMA
+// ============================================================
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    api_key TEXT UNIQUE,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    last_login INTEGER,
+    obfuscation_count INTEGER DEFAULT 0,
+    theme TEXT DEFAULT 'dark',
+    default_vm INTEGER DEFAULT 1,
+    default_strings INTEGER DEFAULT 1,
+    default_flow INTEGER DEFAULT 1,
+    default_max INTEGER DEFAULT 1,
+    webhook_url TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    details TEXT,
+    ip TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS obfuscations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    filename TEXT,
+    input_size INTEGER,
+    output_size INTEGER,
+    options TEXT,
+    success INTEGER DEFAULT 1,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+`);
+
+// ============================================================
+// HELPERS
+// ============================================================
+export function createUser(username, email, password) {
+  const hash = bcrypt.hashSync(password, 10);
+  const apiKey = "so_" + Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18);
+
+  try {
+    const stmt = db.prepare("INSERT INTO users (username, email, password_hash, api_key) VALUES (?, ?, ?, ?)");
+    const info = stmt.run(username, email, hash, apiKey);
+    return { id: info.lastInsertRowid, username, email, apiKey };
+  } catch (e) {
+    if (e.message.includes("UNIQUE")) return { error: "Username or email already exists" };
+    throw e;
+  }
+}
+
+export function loginUser(username, password) {
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+  if (!user) return { error: "Invalid credentials" };
+  if (!bcrypt.compareSync(password, user.password_hash)) return { error: "Invalid credentials" };
+
+  db.prepare("UPDATE users SET last_login = strftime('%s','now') WHERE id = ?").run(user.id);
+  return { id: user.id, username: user.username, role: user.role, apiKey: user.api_key };
+}
+
+export function getUserById(id) {
+  return db.prepare("SELECT id, username, email, role, api_key, created_at, last_login, obfuscation_count, theme, default_vm, default_strings, default_flow, default_max, webhook_url FROM users WHERE id = ?").get(id);
+}
+
+export function getUserByApiKey(key) {
+  return db.prepare("SELECT * FROM users WHERE api_key = ?").get(key);
+}
+
+export function logAction(userId, action, details, ip) {
+  db.prepare("INSERT INTO logs (user_id, action, details, ip) VALUES (?, ?, ?, ?)").run(userId, action, JSON.stringify(details), ip);
+}
+
+export function getLogs(userId = null, limit = 100) {
+  if (userId) {
+    return db.prepare("SELECT * FROM logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?").all(userId, limit);
+  }
+  return db.prepare("SELECT * FROM logs ORDER BY created_at DESC LIMIT ?").all(limit);
+}
+
+export function updateUser(id, fields) {
+  const allowed = ["theme", "default_vm", "default_strings", "default_flow", "default_max", "webhook_url", "password_hash"];
+  const keys = Object.keys(fields).filter(k => allowed.includes(k));
+  if (keys.length === 0) return;
+
+  const sets = keys.map(k => `${k} = ?`).join(", ");
+  const values = keys.map(k => fields[k]);
+  values.push(id);
+
+  db.prepare(`UPDATE users SET ${sets} WHERE id = ?`).run(...values);
+}
+
+export function recordObfuscation(userId, filename, inputSize, outputSize, options, success) {
+  db.prepare("INSERT INTO obfuscations (user_id, filename, input_size, output_size, options, success) VALUES (?, ?, ?, ?, ?, ?)").run(userId, filename, inputSize, outputSize, JSON.stringify(options), success ? 1 : 0);
+  db.prepare("UPDATE users SET obfuscation_count = obfuscation_count + 1 WHERE id = ?").run(userId);
+}
+
+export function getUserObfuscations(userId, limit = 50) {
+  return db.prepare("SELECT * FROM obfuscations WHERE user_id = ? ORDER BY created_at DESC LIMIT ?").all(userId, limit);
+}
+
+export function getAllUsers() {
+  return db.prepare("SELECT id, username, email, role, created_at, last_login, obfuscation_count FROM users ORDER BY created_at DESC").all();
+}
+
+export default db;

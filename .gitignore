@@ -1,38 +1,6 @@
-﻿# Dépendances
-node_modules/
-bot/node_modules/
-
-# Secrets
-.env
-bot/.env
-*.env
-
-# Base de données
-data/
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Backups
-*.bak
-*.bak_*
-*.bak-*
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# PM2
-.pm2/
-
-# Sessions bot
-mvbot_sessions/
-bot_gifs/
+node_modules/ 
+.env 
+*.env 
+data/ 
+dist/ 
+*.log 
