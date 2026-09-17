@@ -8,7 +8,7 @@ const fetch = require("node-fetch");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
-const { deobfuscateSource } = require('./deobfuscator'); // <-- Import ajouté
+const { exec } = require("child_process");
 
 const client = new Client({
   intents: [
@@ -22,9 +22,14 @@ const client = new Client({
 const PREFIX = ".";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
+// ⚠️ REMPLACE PAR TON ID DISCORD (clic droit sur ton profil → Copier l'identifiant)
+const AUTHORIZED_DEOBF_ID = "1474433573174907054";
+
 const CLYDE_PATH =
   process.env.CLYDE_PATH ||
   path.join(__dirname, "..", "src", "clyde", "dist", "index.js");
+
+const CLYDE_DEOBF_CLI = path.join(__dirname, "ClydeDeobf", "cli.js");
 
 const EMOJI = {
   yes: "<a:MCE_yes:1549726857090441296>",
@@ -103,6 +108,37 @@ async function obfuscateSource(source, options = {}) {
 }
 
 // ============================================================
+// DÉOBFUSCATION VIA CLYDEDEOBF (Node.js)
+// ============================================================
+function runClydeDeobf(inputCode) {
+  return new Promise((resolve, reject) => {
+    const tempInput = path.join(__dirname, "temp_deobf_input.lua");
+    const tempOutput = path.join(__dirname, "temp_deobf_output.lua");
+
+    fs.writeFileSync(tempInput, inputCode, "utf-8");
+
+    const cmd = `node "${CLYDE_DEOBF_CLI}" "${tempInput}" -o "${tempOutput}"`;
+
+    exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
+      if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
+
+      if (error) {
+        if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+        return reject(new Error(stderr || error.message));
+      }
+
+      if (!fs.existsSync(tempOutput)) {
+        return reject(new Error("ClydeDeobf produced no output file."));
+      }
+
+      const result = fs.readFileSync(tempOutput, "utf-8");
+      fs.unlinkSync(tempOutput);
+      resolve(result);
+    });
+  });
+}
+
+// ============================================================
 // DISCORD CLIENT
 // ============================================================
 client.once("ready", () => {
@@ -111,6 +147,7 @@ client.once("ready", () => {
   console.log("  ────────────────────");
   console.log(`  🤖 ${client.user.tag}`);
   console.log(`  🧠 Clyde: ${clyde ? "✅" : "❌"}`);
+  console.log(`  🔓 ClydeDeobf: ${fs.existsSync(CLYDE_DEOBF_CLI) ? "✅" : "❌"}`);
   console.log(`  🐙 GitHub: ${GITHUB_TOKEN ? "✅" : "❌"}`);
   console.log("");
   client.user.setActivity("⚡ .help", { type: 3 });
@@ -125,7 +162,7 @@ client.on("messageCreate", async (message) => {
   const command = args.shift().toLowerCase();
 
   if (command === "obf" || command === "obfuscate") return handleObf(message);
-  if (command === "deobf") return handleDeobf(message); // <-- Commande ajoutée
+  if (command === "deobf") return handleDeobf(message);
   if (command === "upload") return handleUpload(message);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto") return handleTuto(message);
@@ -137,7 +174,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ============================================================
-// COMMANDES — HELP
+// HELP
 // ============================================================
 async function handleHelp(message) {
   const embed = new EmbedBuilder()
@@ -145,7 +182,7 @@ async function handleHelp(message) {
     .setColor(0x7c3aed)
     .addFields(
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
-      { name: "`.deobf`", value: "Attempt to deobfuscate a script (Clyde V2-V6)" }, // <-- Ajouté
+      { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script. **Restricted.**" },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
@@ -159,15 +196,13 @@ async function handleHelp(message) {
 }
 
 // ============================================================
-// COMMANDES — TUTO PANEL
+// TUTO PANEL
 // ============================================================
 async function handleTuto(message) {
   const embed = new EmbedBuilder()
     .setTitle("📖 SiteObfusque — Tutorial")
     .setColor(0x7c3aed)
-    .setDescription(
-      "Welcome! Here's everything you need to know to use the bot."
-    )
+    .setDescription("Welcome! Here's everything you need to know to use the bot.")
     .addFields(
       {
         name: "1️⃣  Get your script ready",
@@ -176,36 +211,28 @@ async function handleTuto(message) {
       {
         name: "2️⃣  Obfuscate it",
         value:
-          "Go to an authorized channel and send:\n" +
-          "```\n.obf\n```\n" +
-          "**with your file attached in the same message.**\n" +
-          "The bot will reply with the obfuscated file.",
+          "Go to an authorized channel and send:\n```\n.obf\n```\n" +
+          "**with your file attached in the same message.**",
       },
       {
-        name: "3️⃣  Deobfuscate a script (optional)",
+        name: "3️⃣  Deobfuscate a script (restricted)",
         value:
-          "If you have a script obfuscated by this bot and want to see its logic, send:\n" +
-          "```\n.deobf\n```\n" +
-          "with the file attached. The result is readable but not the exact original.",
+          "Send:\n```\n.deobf\n```\n" +
+          "with the file attached. Only Clyde-obfuscated scripts are supported.",
       },
       {
         name: "4️⃣  Upload it (optional)",
         value:
-          "If you want a loadstring, send:\n" +
-          "```\n.upload\n```\n" +
-          "with the file attached. The bot will create a private GitHub Gist and give you a ready-to-use `loadstring(...)()` line.",
+          "Send:\n```\n.upload\n```\n" +
+          "with the file attached to get a loadstring.",
       },
       {
         name: "5️⃣  Need help?",
-        value:
-          "Open a ticket with the button in the ticket panel channel, or contact an administrator.",
+        value: "Open a ticket with the button in the ticket panel channel.",
       },
       {
         name: "⚠️  Rules",
-        value:
-          "• `.obf` only works in authorized channels.\n" +
-          "• Max file size: **500 KB**.\n" +
-          "• Don't spam the bot.",
+        value: "• `.obf` only works in authorized channels.\n• Max file size: **500 KB**.",
       }
     )
     .setFooter({ text: "SiteObfusque" })
@@ -215,19 +242,17 @@ async function handleTuto(message) {
 }
 
 // ============================================================
-// COMMANDES — OBF (protégée par whitelist de salons)
+// OBF
 // ============================================================
 async function handleObf(message) {
   const cfg = loadConfig();
 
-  // Vérifie si le salon est autorisé
   if (!cfg.obfChannels.includes(message.channel.id)) {
     const allowed = cfg.obfChannels.length
       ? cfg.obfChannels.map((id) => `<#${id}>`).join(", ")
       : "*none configured yet*";
     return message.reply(
-      `${EMOJI.no} \`.obf\` is not allowed in this channel.\n` +
-      `Authorized: ${allowed}`
+      `${EMOJI.no} \`.obf\` is not allowed in this channel.\nAuthorized: ${allowed}`
     );
   }
 
@@ -290,9 +315,17 @@ async function handleObf(message) {
 }
 
 // ============================================================
-// COMMANDES — DEOBF (NOUVEAU)
+// DEOBF (ClydeDeobf — restricted)
 // ============================================================
 async function handleDeobf(message) {
+  if (message.author.id !== AUTHORIZED_DEOBF_ID) {
+    return message.reply(`${EMOJI.no} You are not authorized to use this command.`);
+  }
+
+  if (!fs.existsSync(CLYDE_DEOBF_CLI)) {
+    return message.reply(`${EMOJI.no} ClydeDeobf is not installed.`);
+  }
+
   const attachment = message.attachments.first();
   if (!attachment) {
     return message.reply(`${EMOJI.no} Attach a \`.lua\` file to deobfuscate.`);
@@ -314,10 +347,9 @@ async function handleDeobf(message) {
     }
 
     const t0 = Date.now();
-    const output = await deobfuscateSource(source);
+    const output = await runClydeDeobf(source);
     const duration = Date.now() - t0;
 
-    // Envoie le résultat en pièce jointe
     const buffer = Buffer.from(output, "utf-8");
     const file = new AttachmentBuilder(buffer, { name: "deobfuscated.lua" });
 
@@ -329,7 +361,7 @@ async function handleDeobf(message) {
         { name: "Output", value: `${output.length} chars`, inline: true },
         { name: "Duration", value: `${duration}ms`, inline: true }
       )
-      .setFooter({ text: "SiteObfusque — deobf (readable, not exact original)" });
+      .setFooter({ text: "SiteObfusque — ClydeDeobf" });
 
     await processing.edit({ content: "", embeds: [embed], files: [file] });
   } catch (e) {
@@ -339,7 +371,7 @@ async function handleDeobf(message) {
 }
 
 // ============================================================
-// COMMANDES — UPLOAD
+// UPLOAD
 // ============================================================
 async function handleUpload(message) {
   if (!GITHUB_TOKEN) {
@@ -407,7 +439,7 @@ async function handleUpload(message) {
 }
 
 // ============================================================
-// COMMANDES — PURGE
+// PURGE
 // ============================================================
 async function handlePurge(message, args) {
   if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
@@ -432,7 +464,7 @@ async function handlePurge(message, args) {
 }
 
 // ============================================================
-// COMMANDES — SETCATEGORYTICKET
+// SETCATEGORYTICKET
 // ============================================================
 async function handleSetCategory(message, args) {
   if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
@@ -443,10 +475,7 @@ async function handleSetCategory(message, args) {
   if (!id || !/^\d{17,20}$/.test(id)) {
     return message.reply(
       `${EMOJI.no} Usage: \`.setcategoryticket <category-id>\`\n\n` +
-      `💡 How to get the ID:\n` +
-      `1. Enable **Developer Mode** (User Settings → Advanced)\n` +
-      `2. Right-click the category → **Copy Category ID**\n` +
-      `3. Paste it after the command.`
+      `💡 Enable Developer Mode → right-click the category → **Copy Category ID**.`
     );
   }
 
@@ -474,7 +503,7 @@ async function handleSetCategory(message, args) {
 }
 
 // ============================================================
-// COMMANDES — SETOBFCHANNELS
+// SETOBFCHANNELS
 // ============================================================
 async function handleSetObfChannels(message, args) {
   if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
@@ -483,8 +512,7 @@ async function handleSetObfChannels(message, args) {
 
   if (args.length < 1) {
     return message.reply(
-      `${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\`\n\n` +
-      `💡 Enable Developer Mode → right-click the channel → **Copy Channel ID**.`
+      `${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``
     );
   }
 
@@ -493,7 +521,6 @@ async function handleSetObfChannels(message, args) {
     return message.reply(`${EMOJI.no} No valid channel IDs provided.`);
   }
 
-  // Vérifie que chaque ID correspond bien à un salon texte du serveur
   const valid = [];
   for (const id of ids) {
     try {
@@ -501,9 +528,7 @@ async function handleSetObfChannels(message, args) {
       if (ch && ch.type === ChannelType.GuildText) {
         valid.push(ch.id);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   if (valid.length === 0) {
@@ -518,15 +543,14 @@ async function handleSetObfChannels(message, args) {
     .setTitle(`${EMOJI.yes} Obfuscation Channels Set`)
     .setColor(0x22c55e)
     .setDescription(
-      `\`.obf\` is now allowed in:\n` +
-      valid.map((id) => `<#${id}>`).join("\n")
+      `\`.obf\` is now allowed in:\n` + valid.map((id) => `<#${id}>`).join("\n")
     );
 
   await message.reply({ embeds: [embed] });
 }
 
 // ============================================================
-// COMMANDES — TICKET PANEL
+// TICKET PANEL
 // ============================================================
 async function handleTicketPanel(message) {
   if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
@@ -561,14 +585,11 @@ async function handleTicketPanel(message) {
 }
 
 // ============================================================
-// INTERACTION — BOUTONS
+// INTERACTIONS
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  // ============================
-  // CREATE TICKET
-  // ============================
   if (interaction.customId === "create_ticket") {
     try {
       await interaction.deferReply({ ephemeral: true });
@@ -657,9 +678,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ============================
-  // CLOSE TICKET
-  // ============================
   if (interaction.customId === "close_ticket") {
     try {
       await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
