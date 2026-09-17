@@ -1,9 +1,12 @@
 ﻿require("dotenv").config();
 const {
   Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField,
+  ChannelType,
 } = require("discord.js");
 const fetch = require("node-fetch");
 const path = require("path");
+const fs = require("fs");
 const { pathToFileURL } = require("url");
 
 const client = new Client({
@@ -11,6 +14,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -26,6 +30,26 @@ const EMOJI = {
   no: "<a:No:1549726859661545492>",
   loading: "<a:loading:1549726853424615424>",
 };
+
+// ============================================================
+// CONFIG TICKETS (stockée dans un json local)
+// ============================================================
+const CONFIG_PATH = path.join(__dirname, "ticket-config.json");
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    }
+  } catch (e) {
+    console.error("[config] load error:", e.message);
+  }
+  return { categoryId: null, ticketCounter: 0 };
+}
+
+function saveConfig(cfg) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
 
 // ============================================================
 // CHARGEMENT DIRECT DE CLYDE
@@ -88,6 +112,7 @@ client.once("ready", () => {
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  if (!message.guild) return;
   if (!message.content.startsWith(PREFIX)) return;
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
@@ -96,10 +121,14 @@ client.on("messageCreate", async (message) => {
   if (command === "obf" || command === "obfuscate") return handleObf(message);
   if (command === "upload") return handleUpload(message);
   if (command === "help" || command === "aide") return handleHelp(message);
+  if (command === "purge") return handlePurge(message, args);
+  if (command === "setcategoryticket") return handleSetCategory(message, args);
+  if (command === "ticketchannel" || command === "tickerchannel")
+    return handleTicketPanel(message);
 });
 
 // ============================================================
-// COMMANDES
+// COMMANDES — HELP
 // ============================================================
 async function handleHelp(message) {
   const embed = new EmbedBuilder()
@@ -108,12 +137,18 @@ async function handleHelp(message) {
     .addFields(
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (local, VM-based)" },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
+      { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
+      { name: "`.setcategoryticket #category`", value: "Set the category for tickets" },
+      { name: "`.ticketchannel`", value: "Send the ticket panel in this channel" },
       { name: "`.help`", value: "Show this message" }
     )
     .setFooter({ text: "SiteObfusque" });
   await message.reply({ embeds: [embed] });
 }
 
+// ============================================================
+// COMMANDES — OBF
+// ============================================================
 async function handleObf(message) {
   const attachment = message.attachments.first();
   if (!attachment) {
@@ -173,6 +208,9 @@ async function handleObf(message) {
   }
 }
 
+// ============================================================
+// COMMANDES — UPLOAD
+// ============================================================
 async function handleUpload(message) {
   if (!GITHUB_TOKEN) {
     return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
@@ -237,6 +275,196 @@ async function handleUpload(message) {
     await processing.edit(`${EMOJI.no} Error: ${e.message}`);
   }
 }
+
+// ============================================================
+// COMMANDES — PURGE
+// ============================================================
+async function handlePurge(message, args) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+    return message.reply(`${EMOJI.no} You need \`Manage Messages\` permission.`);
+  }
+
+  const amount = parseInt(args[0], 10);
+  if (isNaN(amount) || amount < 1 || amount > 100) {
+    return message.reply(`${EMOJI.no} Usage: \`.purge <1-100>\``);
+  }
+
+  try {
+    const deleted = await message.channel.bulkDelete(amount, true);
+    const reply = await message.channel.send(
+      `${EMOJI.yes} Deleted **${deleted.size}** message(s).`
+    );
+    setTimeout(() => reply.delete().catch(() => {}), 4000);
+  } catch (e) {
+    console.error("[.purge error]", e);
+    message.reply(`${EMOJI.no} Error: ${e.message}`);
+  }
+}
+
+// ============================================================
+// COMMANDES — SETCATEGORYTICKET
+// ============================================================
+async function handleSetCategory(message, args) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
+  }
+
+  const category = message.mentions.channels.first();
+  if (!category || category.type !== ChannelType.GuildCategory) {
+    return message.reply(`${EMOJI.no} Usage: \`.setcategoryticket #category\``);
+  }
+
+  const cfg = loadConfig();
+  cfg.categoryId = category.id;
+  saveConfig(cfg);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${EMOJI.yes} Ticket Category Set`)
+    .setColor(0x22c55e)
+    .setDescription(`Tickets will now be created in **${category.name}**.`);
+
+  await message.reply({ embeds: [embed] });
+}
+
+// ============================================================
+// COMMANDES — TICKET PANEL
+// ============================================================
+async function handleTicketPanel(message) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
+  }
+
+  const cfg = loadConfig();
+  if (!cfg.categoryId) {
+    return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket #category\``);
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle("🎫 Support Tickets")
+    .setColor(0x7c3aed)
+    .setDescription(
+      "Need help? Click the button below to open a private ticket.\n\n" +
+      "**Our team will assist you as soon as possible.**"
+    )
+    .setFooter({ text: "SiteObfusque Support" });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("create_ticket")
+      .setLabel("Create Ticket")
+      .setEmoji("🎫")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  await message.channel.send({ embeds: [embed], components: [row] });
+}
+
+// ============================================================
+// INTERACTION — BOUTON TICKET
+// ============================================================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+  if (interaction.customId !== "create_ticket") return;
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const cfg = loadConfig();
+    if (!cfg.categoryId) {
+      return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
+    }
+
+    const guild = interaction.guild;
+    const user = interaction.user;
+
+    // Vérifie si l'utilisateur a déjà un ticket ouvert
+    const existing = guild.channels.cache.find(
+      (c) => c.name === `ticket-${user.username.toLowerCase()}` && c.parentId === cfg.categoryId
+    );
+    if (existing) {
+      return interaction.editReply(`${EMOJI.no} You already have an open ticket: <#${existing.id}>`);
+    }
+
+    cfg.ticketCounter = (cfg.ticketCounter || 0) + 1;
+    saveConfig(cfg);
+
+    const channel = await guild.channels.create({
+      name: `ticket-${user.username.toLowerCase()}`,
+      type: ChannelType.GuildText,
+      parent: cfg.categoryId,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          deny: [PermissionsBitField.Flags.ViewChannel],
+        },
+        {
+          id: user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+          ],
+        },
+        {
+          id: client.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ManageChannels,
+            PermissionsBitField.Flags.ReadMessageHistory,
+          ],
+        },
+      ],
+    });
+
+    const ticketEmbed = new EmbedBuilder()
+      .setTitle(`🎫 Ticket — ${user.username}`)
+      .setColor(0x7c3aed)
+      .setDescription(
+        `Hello <@${user.id}>, a member of our team will be with you shortly.\n\n` +
+        "Please describe your issue in detail."
+      )
+      .setFooter({ text: "SiteObfusque Support" });
+
+    const closeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Close Ticket")
+        .setEmoji("🔒")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    await channel.send({
+      content: `<@${user.id}>`,
+      embeds: [ticketEmbed],
+      components: [closeRow],
+    });
+
+    await interaction.editReply(`${EMOJI.yes} Ticket created: <#${channel.id}>`);
+  } catch (e) {
+    console.error("[ticket error]", e);
+    if (interaction.deferred || interaction.replied) {
+      interaction.editReply(`${EMOJI.no} Error: ${e.message}`).catch(() => {});
+    }
+  }
+});
+
+// ============================================================
+// INTERACTION — BOUTON FERMER TICKET
+// ============================================================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+  if (interaction.customId !== "close_ticket") return;
+
+  try {
+    await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
+    setTimeout(() => {
+      interaction.channel.delete().catch(() => {});
+    }, 5000);
+  } catch (e) {
+    console.error("[close ticket error]", e);
+  }
+});
 
 // ============================================================
 // DÉMARRAGE
