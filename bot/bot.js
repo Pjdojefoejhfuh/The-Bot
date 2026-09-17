@@ -8,6 +8,7 @@ const fetch = require("node-fetch");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
+const { deobfuscateSource } = require('./deobfuscator'); // <-- Import ajouté
 
 const client = new Client({
   intents: [
@@ -124,6 +125,7 @@ client.on("messageCreate", async (message) => {
   const command = args.shift().toLowerCase();
 
   if (command === "obf" || command === "obfuscate") return handleObf(message);
+  if (command === "deobf") return handleDeobf(message); // <-- Commande ajoutée
   if (command === "upload") return handleUpload(message);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto") return handleTuto(message);
@@ -143,6 +145,7 @@ async function handleHelp(message) {
     .setColor(0x7c3aed)
     .addFields(
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
+      { name: "`.deobf`", value: "Attempt to deobfuscate a script (Clyde V2-V6)" }, // <-- Ajouté
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
@@ -179,14 +182,21 @@ async function handleTuto(message) {
           "The bot will reply with the obfuscated file.",
       },
       {
-        name: "3️⃣  Upload it (optional)",
+        name: "3️⃣  Deobfuscate a script (optional)",
+        value:
+          "If you have a script obfuscated by this bot and want to see its logic, send:\n" +
+          "```\n.deobf\n```\n" +
+          "with the file attached. The result is readable but not the exact original.",
+      },
+      {
+        name: "4️⃣  Upload it (optional)",
         value:
           "If you want a loadstring, send:\n" +
           "```\n.upload\n```\n" +
           "with the file attached. The bot will create a private GitHub Gist and give you a ready-to-use `loadstring(...)()` line.",
       },
       {
-        name: "4️⃣  Need help?",
+        name: "5️⃣  Need help?",
         value:
           "Open a ticket with the button in the ticket panel channel, or contact an administrator.",
       },
@@ -275,6 +285,55 @@ async function handleObf(message) {
     await processing.edit({ content: "", embeds: [embed], files: [file] });
   } catch (e) {
     console.error("[.obf error]", e);
+    await processing.edit(`${EMOJI.no} Error: ${e.message}`);
+  }
+}
+
+// ============================================================
+// COMMANDES — DEOBF (NOUVEAU)
+// ============================================================
+async function handleDeobf(message) {
+  const attachment = message.attachments.first();
+  if (!attachment) {
+    return message.reply(`${EMOJI.no} Attach a \`.lua\` file to deobfuscate.`);
+  }
+
+  const filename = attachment.name.toLowerCase();
+  if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
+    return message.reply(`${EMOJI.no} Supported: \`.lua\`, \`.luau\`, \`.txt\``);
+  }
+
+  const processing = await message.reply(`${EMOJI.loading} Deobfuscating... (this may take a moment)`);
+
+  try {
+    const res = await fetch(attachment.url);
+    const source = await res.text();
+
+    if (source.length > 500000) {
+      return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
+    }
+
+    const t0 = Date.now();
+    const output = await deobfuscateSource(source);
+    const duration = Date.now() - t0;
+
+    // Envoie le résultat en pièce jointe
+    const buffer = Buffer.from(output, "utf-8");
+    const file = new AttachmentBuilder(buffer, { name: "deobfuscated.lua" });
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${EMOJI.yes} Deobfuscation Complete`)
+      .setColor(0x22c55e)
+      .addFields(
+        { name: "Input", value: `${source.length} chars`, inline: true },
+        { name: "Output", value: `${output.length} chars`, inline: true },
+        { name: "Duration", value: `${duration}ms`, inline: true }
+      )
+      .setFooter({ text: "SiteObfusque — deobf (readable, not exact original)" });
+
+    await processing.edit({ content: "", embeds: [embed], files: [file] });
+  } catch (e) {
+    console.error("[.deobf error]", e);
     await processing.edit(`${EMOJI.no} Error: ${e.message}`);
   }
 }
