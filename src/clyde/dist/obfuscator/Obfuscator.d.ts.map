@@ -1,0 +1,1 @@
+{"version":3,"file":"Obfuscator.d.ts","sourceRoot":"","sources":["../../src/obfuscator/Obfuscator.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EACV,KAAK,EAQN,MAAM,iBAAiB,CAAC;AAiCzB,MAAM,WAAW,iBAAiB;IAEhC,YAAY,CAAC,EAAE,OAAO,CAAC;IAEvB,eAAe,CAAC,EAAE,OAAO,CAAC;IAE1B,IAAI,CAAC,EAAE,MAAM,CAAC;CACf;AAQD,wBAAgB,SAAS,CAAC,GAAG,EAAE,KAAK,EAAE,OAAO,GAAE,iBAAsB,GAAG,KAAK,CAM5E"}

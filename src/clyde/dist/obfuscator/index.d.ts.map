@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../src/obfuscator/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,SAAS,EAAE,KAAK,iBAAiB,EAAE,MAAM,iBAAiB,CAAC;AACpE,OAAO,EAAE,aAAa,EAAE,KAAK,oBAAoB,EAAE,MAAM,oBAAoB,CAAC;AAC9E,OAAO,EAAE,mBAAmB,EAAE,KAAK,2BAA2B,EAAE,MAAM,2BAA2B,CAAC;AAClG,OAAO,EAAE,UAAU,EAAE,eAAe,EAAE,MAAM,cAAc,CAAC"}
