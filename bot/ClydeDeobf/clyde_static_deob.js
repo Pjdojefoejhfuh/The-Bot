@@ -3936,7 +3936,7 @@ function regSkeleton(body, roles) {
   return s;
 }
 
-const CREDIT = "-- Deobfed by jamie's deobfuscator at <<https://github.com/JamiesNolandGiggleShi1er/ClydeDeobfuscator>> also join omniDBF pls <<dsc.gg/odbf>>";
+const CREDIT = "-- Deobfed by ZigZoug deobfuscator";
 
 function stamp(text) {
   if (typeof text !== 'string' || !text.length) return text;
