@@ -32,19 +32,24 @@ const EMOJI = {
 };
 
 // ============================================================
-// CONFIG TICKETS (stockée dans un json local)
+// CONFIG (tickets + obf channels)
 // ============================================================
-const CONFIG_PATH = path.join(__dirname, "ticket-config.json");
+const CONFIG_PATH = path.join(__dirname, "bot-config.json");
 
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      return {
+        categoryId: cfg.categoryId || null,
+        ticketCounter: cfg.ticketCounter || 0,
+        obfChannels: cfg.obfChannels || [],
+      };
     }
   } catch (e) {
     console.error("[config] load error:", e.message);
   }
-  return { categoryId: null, ticketCounter: 0 };
+  return { categoryId: null, ticketCounter: 0, obfChannels: [] };
 }
 
 function saveConfig(cfg) {
@@ -121,8 +126,10 @@ client.on("messageCreate", async (message) => {
   if (command === "obf" || command === "obfuscate") return handleObf(message);
   if (command === "upload") return handleUpload(message);
   if (command === "help" || command === "aide") return handleHelp(message);
+  if (command === "tuto") return handleTuto(message);
   if (command === "purge") return handlePurge(message, args);
   if (command === "setcategoryticket") return handleSetCategory(message, args);
+  if (command === "setobfchannels") return handleSetObfChannels(message, args);
   if (command === "ticketchannel" || command === "tickerchannel")
     return handleTicketPanel(message);
 });
@@ -135,10 +142,12 @@ async function handleHelp(message) {
     .setTitle(`${EMOJI.yes} SiteObfusque Bot — Commands`)
     .setColor(0x7c3aed)
     .addFields(
-      { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (local, VM-based)" },
+      { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
+      { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
       { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets (Manage Server required)" },
+      { name: "`.setobfchannels <id1> <id2>`", value: "Set the 2 channels where `.obf` is allowed (Manage Server required)" },
       { name: "`.ticketchannel`", value: "Send the ticket panel in this channel (Manage Server required)" },
       { name: "`.help`", value: "Show this message" }
     )
@@ -147,9 +156,71 @@ async function handleHelp(message) {
 }
 
 // ============================================================
-// COMMANDES — OBF
+// COMMANDES — TUTO PANEL
+// ============================================================
+async function handleTuto(message) {
+  const embed = new EmbedBuilder()
+    .setTitle("📖 SiteObfusque — Tutorial")
+    .setColor(0x7c3aed)
+    .setDescription(
+      "Welcome! Here's everything you need to know to use the bot."
+    )
+    .addFields(
+      {
+        name: "1️⃣  Get your script ready",
+        value: "Save your Lua/Luau script as a `.lua`, `.luau`, or `.txt` file on your computer.",
+      },
+      {
+        name: "2️⃣  Obfuscate it",
+        value:
+          "Go to an authorized channel and send:\n" +
+          "```\n.obf\n```\n" +
+          "**with your file attached in the same message.**\n" +
+          "The bot will reply with the obfuscated file.",
+      },
+      {
+        name: "3️⃣  Upload it (optional)",
+        value:
+          "If you want a loadstring, send:\n" +
+          "```\n.upload\n```\n" +
+          "with the file attached. The bot will create a private GitHub Gist and give you a ready-to-use `loadstring(...)()` line.",
+      },
+      {
+        name: "4️⃣  Need help?",
+        value:
+          "Open a ticket with the button in the ticket panel channel, or contact an administrator.",
+      },
+      {
+        name: "⚠️  Rules",
+        value:
+          "• `.obf` only works in authorized channels.\n" +
+          "• Max file size: **500 KB**.\n" +
+          "• Don't spam the bot.",
+      }
+    )
+    .setFooter({ text: "SiteObfusque" })
+    .setTimestamp();
+
+  await message.channel.send({ embeds: [embed] });
+}
+
+// ============================================================
+// COMMANDES — OBF (protégée par whitelist de salons)
 // ============================================================
 async function handleObf(message) {
+  const cfg = loadConfig();
+
+  // Vérifie si le salon est autorisé
+  if (!cfg.obfChannels.includes(message.channel.id)) {
+    const allowed = cfg.obfChannels.length
+      ? cfg.obfChannels.map((id) => `<#${id}>`).join(", ")
+      : "*none configured yet*";
+    return message.reply(
+      `${EMOJI.no} \`.obf\` is not allowed in this channel.\n` +
+      `Authorized: ${allowed}`
+    );
+  }
+
   const attachment = message.attachments.first();
   if (!attachment) {
     return message.reply(`${EMOJI.no} Attach a \`.lua\` / \`.luau\` file.`);
@@ -344,6 +415,58 @@ async function handleSetCategory(message, args) {
 }
 
 // ============================================================
+// COMMANDES — SETOBFCHANNELS
+// ============================================================
+async function handleSetObfChannels(message, args) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
+  }
+
+  if (args.length < 1) {
+    return message.reply(
+      `${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\`\n\n` +
+      `💡 Enable Developer Mode → right-click the channel → **Copy Channel ID**.`
+    );
+  }
+
+  const ids = args.filter((a) => /^\d{17,20}$/.test(a));
+  if (ids.length === 0) {
+    return message.reply(`${EMOJI.no} No valid channel IDs provided.`);
+  }
+
+  // Vérifie que chaque ID correspond bien à un salon texte du serveur
+  const valid = [];
+  for (const id of ids) {
+    try {
+      const ch = await message.guild.channels.fetch(id);
+      if (ch && ch.type === ChannelType.GuildText) {
+        valid.push(ch.id);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (valid.length === 0) {
+    return message.reply(`${EMOJI.no} None of the provided IDs are valid text channels.`);
+  }
+
+  const cfg = loadConfig();
+  cfg.obfChannels = valid;
+  saveConfig(cfg);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${EMOJI.yes} Obfuscation Channels Set`)
+    .setColor(0x22c55e)
+    .setDescription(
+      `\`.obf\` is now allowed in:\n` +
+      valid.map((id) => `<#${id}>`).join("\n")
+    );
+
+  await message.reply({ embeds: [embed] });
+}
+
+// ============================================================
 // COMMANDES — TICKET PANEL
 // ============================================================
 async function handleTicketPanel(message) {
@@ -379,7 +502,7 @@ async function handleTicketPanel(message) {
 }
 
 // ============================================================
-// INTERACTION — BOUTON CRÉER TICKET
+// INTERACTION — BOUTONS
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
@@ -399,7 +522,6 @@ client.on("interactionCreate", async (interaction) => {
       const guild = interaction.guild;
       const user = interaction.user;
 
-      // Vérifie si l'utilisateur a déjà un ticket ouvert
       const existing = guild.channels.cache.find(
         (c) =>
           c.name === `ticket-${user.username.toLowerCase()}` &&
