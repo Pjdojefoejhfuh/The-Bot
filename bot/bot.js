@@ -138,8 +138,8 @@ async function handleHelp(message) {
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (local, VM-based)" },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
-      { name: "`.setcategoryticket #category`", value: "Set the category for tickets" },
-      { name: "`.ticketchannel`", value: "Send the ticket panel in this channel" },
+      { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets (Manage Server required)" },
+      { name: "`.ticketchannel`", value: "Send the ticket panel in this channel (Manage Server required)" },
       { name: "`.help`", value: "Show this message" }
     )
     .setFooter({ text: "SiteObfusque" });
@@ -309,9 +309,26 @@ async function handleSetCategory(message, args) {
     return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
   }
 
-  const category = message.mentions.channels.first();
+  const id = args[0];
+  if (!id || !/^\d{17,20}$/.test(id)) {
+    return message.reply(
+      `${EMOJI.no} Usage: \`.setcategoryticket <category-id>\`\n\n` +
+      `💡 How to get the ID:\n` +
+      `1. Enable **Developer Mode** (User Settings → Advanced)\n` +
+      `2. Right-click the category → **Copy Category ID**\n` +
+      `3. Paste it after the command.`
+    );
+  }
+
+  let category;
+  try {
+    category = await message.guild.channels.fetch(id);
+  } catch {
+    return message.reply(`${EMOJI.no} No channel found with ID \`${id}\`.`);
+  }
+
   if (!category || category.type !== ChannelType.GuildCategory) {
-    return message.reply(`${EMOJI.no} Usage: \`.setcategoryticket #category\``);
+    return message.reply(`${EMOJI.no} \`${id}\` is not a category.`);
   }
 
   const cfg = loadConfig();
@@ -321,7 +338,7 @@ async function handleSetCategory(message, args) {
   const embed = new EmbedBuilder()
     .setTitle(`${EMOJI.yes} Ticket Category Set`)
     .setColor(0x22c55e)
-    .setDescription(`Tickets will now be created in **${category.name}**.`);
+    .setDescription(`Tickets will now be created in **${category.name}** (\`${category.id}\`).`);
 
   await message.reply({ embeds: [embed] });
 }
@@ -336,7 +353,9 @@ async function handleTicketPanel(message) {
 
   const cfg = loadConfig();
   if (!cfg.categoryId) {
-    return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket #category\``);
+    return message.reply(
+      `${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``
+    );
   }
 
   const embed = new EmbedBuilder()
@@ -360,109 +379,116 @@ async function handleTicketPanel(message) {
 }
 
 // ============================================================
-// INTERACTION — BOUTON TICKET
+// INTERACTION — BOUTON CRÉER TICKET
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
-  if (interaction.customId !== "create_ticket") return;
 
-  try {
-    await interaction.deferReply({ ephemeral: true });
+  // ============================
+  // CREATE TICKET
+  // ============================
+  if (interaction.customId === "create_ticket") {
+    try {
+      await interaction.deferReply({ ephemeral: true });
 
-    const cfg = loadConfig();
-    if (!cfg.categoryId) {
-      return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
+      const cfg = loadConfig();
+      if (!cfg.categoryId) {
+        return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
+      }
+
+      const guild = interaction.guild;
+      const user = interaction.user;
+
+      // Vérifie si l'utilisateur a déjà un ticket ouvert
+      const existing = guild.channels.cache.find(
+        (c) =>
+          c.name === `ticket-${user.username.toLowerCase()}` &&
+          c.parentId === cfg.categoryId
+      );
+      if (existing) {
+        return interaction.editReply(
+          `${EMOJI.no} You already have an open ticket: <#${existing.id}>`
+        );
+      }
+
+      cfg.ticketCounter = (cfg.ticketCounter || 0) + 1;
+      saveConfig(cfg);
+
+      const channel = await guild.channels.create({
+        name: `ticket-${user.username.toLowerCase()}`,
+        type: ChannelType.GuildText,
+        parent: cfg.categoryId,
+        permissionOverwrites: [
+          {
+            id: guild.roles.everyone.id,
+            deny: [PermissionsBitField.Flags.ViewChannel],
+          },
+          {
+            id: user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+            ],
+          },
+          {
+            id: client.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ManageChannels,
+              PermissionsBitField.Flags.ReadMessageHistory,
+            ],
+          },
+        ],
+      });
+
+      const ticketEmbed = new EmbedBuilder()
+        .setTitle(`🎫 Ticket — ${user.username}`)
+        .setColor(0x7c3aed)
+        .setDescription(
+          `Hello <@${user.id}>, a member of our team will be with you shortly.\n\n` +
+          "Please describe your issue in detail."
+        )
+        .setFooter({ text: "SiteObfusque Support" });
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("close_ticket")
+          .setLabel("Close Ticket")
+          .setEmoji("🔒")
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      await channel.send({
+        content: `<@${user.id}>`,
+        embeds: [ticketEmbed],
+        components: [closeRow],
+      });
+
+      await interaction.editReply(`${EMOJI.yes} Ticket created: <#${channel.id}>`);
+    } catch (e) {
+      console.error("[ticket error]", e);
+      if (interaction.deferred || interaction.replied) {
+        interaction.editReply(`${EMOJI.no} Error: ${e.message}`).catch(() => {});
+      }
     }
-
-    const guild = interaction.guild;
-    const user = interaction.user;
-
-    // Vérifie si l'utilisateur a déjà un ticket ouvert
-    const existing = guild.channels.cache.find(
-      (c) => c.name === `ticket-${user.username.toLowerCase()}` && c.parentId === cfg.categoryId
-    );
-    if (existing) {
-      return interaction.editReply(`${EMOJI.no} You already have an open ticket: <#${existing.id}>`);
-    }
-
-    cfg.ticketCounter = (cfg.ticketCounter || 0) + 1;
-    saveConfig(cfg);
-
-    const channel = await guild.channels.create({
-      name: `ticket-${user.username.toLowerCase()}`,
-      type: ChannelType.GuildText,
-      parent: cfg.categoryId,
-      permissionOverwrites: [
-        {
-          id: guild.roles.everyone.id,
-          deny: [PermissionsBitField.Flags.ViewChannel],
-        },
-        {
-          id: user.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ReadMessageHistory,
-          ],
-        },
-        {
-          id: client.user.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ManageChannels,
-            PermissionsBitField.Flags.ReadMessageHistory,
-          ],
-        },
-      ],
-    });
-
-    const ticketEmbed = new EmbedBuilder()
-      .setTitle(`🎫 Ticket — ${user.username}`)
-      .setColor(0x7c3aed)
-      .setDescription(
-        `Hello <@${user.id}>, a member of our team will be with you shortly.\n\n` +
-        "Please describe your issue in detail."
-      )
-      .setFooter({ text: "SiteObfusque Support" });
-
-    const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Close Ticket")
-        .setEmoji("🔒")
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    await channel.send({
-      content: `<@${user.id}>`,
-      embeds: [ticketEmbed],
-      components: [closeRow],
-    });
-
-    await interaction.editReply(`${EMOJI.yes} Ticket created: <#${channel.id}>`);
-  } catch (e) {
-    console.error("[ticket error]", e);
-    if (interaction.deferred || interaction.replied) {
-      interaction.editReply(`${EMOJI.no} Error: ${e.message}`).catch(() => {});
-    }
+    return;
   }
-});
 
-// ============================================================
-// INTERACTION — BOUTON FERMER TICKET
-// ============================================================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (interaction.customId !== "close_ticket") return;
-
-  try {
-    await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
-    setTimeout(() => {
-      interaction.channel.delete().catch(() => {});
-    }, 5000);
-  } catch (e) {
-    console.error("[close ticket error]", e);
+  // ============================
+  // CLOSE TICKET
+  // ============================
+  if (interaction.customId === "close_ticket") {
+    try {
+      await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
+      setTimeout(() => {
+        interaction.channel.delete().catch(() => {});
+      }, 5000);
+    } catch (e) {
+      console.error("[close ticket error]", e);
+    }
+    return;
   }
 });
 
