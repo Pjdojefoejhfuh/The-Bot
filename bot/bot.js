@@ -7,6 +7,7 @@ const {
 const fetch = require("node-fetch");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { pathToFileURL } = require("url");
 const { exec } = require("child_process");
 
@@ -139,6 +140,37 @@ function runClydeDeobf(inputCode) {
 }
 
 // ============================================================
+// HELPERS GITHUB GIST
+// ============================================================
+async function createGist(description, filename, content, isPublic = true) {
+  const res = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      description,
+      public: isPublic,
+      files: { [filename]: { content } },
+    }),
+  });
+
+  const gist = await res.json();
+  if (!res.ok) {
+    throw new Error(gist.message || "GitHub Gist error");
+  }
+
+  const fileKey = Object.keys(gist.files)[0];
+  return {
+    id: gist.id,
+    htmlUrl: gist.html_url,
+    rawUrl: gist.files[fileKey].raw_url,
+  };
+}
+
+// ============================================================
 // DISCORD CLIENT
 // ============================================================
 client.once("ready", () => {
@@ -163,6 +195,7 @@ client.on("messageCreate", async (message) => {
 
   if (command === "obf" || command === "obfuscate") return handleObf(message);
   if (command === "deobf") return handleDeobf(message);
+  if (command === "loader") return handleLoader(message, args);
   if (command === "upload") return handleUpload(message);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto") return handleTuto(message);
@@ -183,6 +216,7 @@ async function handleHelp(message) {
     .addFields(
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
       { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script. **Restricted.**" },
+      { name: "`.loader \"<key>\"`", value: "Create an open-source loader tied to a key (payload & key stay hidden)" },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
@@ -221,13 +255,19 @@ async function handleTuto(message) {
           "with the file attached. Only Clyde-obfuscated scripts are supported.",
       },
       {
-        name: "4️⃣  Upload it (optional)",
+        name: "4️⃣  Create a protected loader",
+        value:
+          "Send:\n```\n.loader \"your-key\"\n```\n" +
+          "with the file attached. You'll get an open-source loader + a loadstring.",
+      },
+      {
+        name: "5️⃣  Upload it (optional)",
         value:
           "Send:\n```\n.upload\n```\n" +
           "with the file attached to get a loadstring.",
       },
       {
-        name: "5️⃣  Need help?",
+        name: "6️⃣  Need help?",
         value: "Open a ticket with the button in the ticket panel channel.",
       },
       {
@@ -366,6 +406,208 @@ async function handleDeobf(message) {
     await processing.edit({ content: "", embeds: [embed], files: [file] });
   } catch (e) {
     console.error("[.deobf error]", e);
+    await processing.edit(`${EMOJI.no} Error: ${e.message}`);
+  }
+}
+
+// ============================================================
+// LOADER  —  .loader "<key>"  + fichier attaché
+// ------------------------------------------------------------
+// 1) Obfusque le fichier
+// 2) Upload le payload obfusqué sur un Gist GitHub public
+// 3) Génère un loader Lua OPEN SOURCE
+//    → contient seulement le HASH djb2 de la clé (pas la clé en clair)
+//    → contient l'URL du payload encodée en base64 (pas la source)
+// 4) Upload le loader sur un second Gist public
+// 5) Renvoie le loader.lua + le loadstring raw
+// ============================================================
+async function handleLoader(message, args) {
+  if (!GITHUB_TOKEN) {
+    return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
+  }
+
+  // Récupère la clé (supporte les guillemets)
+  const raw = args.join(" ").trim();
+  const key = raw.replace(/^["'`]|["'`]$/g, "").trim();
+
+  if (!key) {
+    return message.reply(
+      `${EMOJI.no} Usage: \`.loader "<key>"\` with a \`.lua\` file attached.`
+    );
+  }
+
+  const attachment = message.attachments.first();
+  if (!attachment) {
+    return message.reply(`${EMOJI.no} Attach a \`.lua\` file.`);
+  }
+
+  const filename = attachment.name.toLowerCase();
+  if (
+    !filename.endsWith(".lua") &&
+    !filename.endsWith(".luau") &&
+    !filename.endsWith(".txt")
+  ) {
+    return message.reply(`${EMOJI.no} Supported: \`.lua\`, \`.luau\`, \`.txt\``);
+  }
+
+  if (!clyde) {
+    return message.reply(`${EMOJI.no} Obfuscator not loaded.`);
+  }
+
+  const processing = await message.reply(`${EMOJI.loading} Creating loader...`);
+
+  try {
+    const res = await fetch(attachment.url);
+    const source = await res.text();
+
+    if (source.length > 500000) {
+      return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
+    }
+
+    // ---------- 1) Obfuscation ----------
+    const obfuscated = await obfuscateSource(source, {
+      vm: true,
+      strings: true,
+      flow: true,
+      vmLevel: "maximum",
+    });
+
+    // ---------- 2) Upload payload obfusqué (Gist public) ----------
+    const payloadFilename = crypto.randomBytes(6).toString("hex") + ".lua";
+    const payloadGist = await createGist(
+      "SiteObfusque payload",
+      payloadFilename,
+      obfuscated,
+      true
+    );
+
+    // ---------- 3) Hash djb2 de la clé ----------
+    const djb2 = (str) => {
+      let h = 5381;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h * 33) + str.charCodeAt(i)) >>> 0;
+      }
+      return h;
+    };
+    const keyHash = djb2(key);
+
+    // ---------- 4) Encodage base64 de l'URL du payload ----------
+    const encodedUrl = Buffer.from(payloadGist.rawUrl, "utf-8").toString("base64");
+
+    // ---------- 5) Génération du loader Lua ----------
+    const loader = `--[[
+    SiteObfusque Loader (open source)
+    ──────────────────────────────────
+    • La clé n'est PAS dans ce fichier (seulement son hash djb2)
+    • La source n'est PAS dans ce fichier (payload récupéré à distance)
+    • Le loader est open source, tu peux le lire et le vérifier
+]]
+
+local KEY_HASH = ${keyHash}
+local ENC_URL  = "${encodedUrl}"
+
+-- base64 decode
+local function b64d(data)
+    local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    data = string.gsub(data, '[^'..b..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r, f = '', (b:find(x) - 1)
+        for i = 6, 1, -1 do
+            r = r .. (f % 2^i - f % 2^(i-1) > 0 and '1' or '0')
+        end
+        return r
+    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c = 0
+        for i = 1, 8 do
+            c = c + (x:sub(i,i) == '1' and 2^(8-i) or 0)
+        end
+        return string.char(c)
+    end))
+end
+
+-- djb2 (identique côté bot)
+local function djb2(s)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + s:byte(i)) % 4294967296
+    end
+    return h
+end
+
+-- Récupération de la clé
+local key = nil
+if getgenv then key = getgenv().SiteObfusque_Key end
+
+if not key or key == "" then
+    warn("[SiteObfusque] Please set getgenv().SiteObfusque_Key = '<your-key>' before running this loader.")
+    return
+end
+
+if djb2(key) ~= KEY_HASH then
+    warn("[SiteObfusque] Invalid key.")
+    return
+end
+
+-- Fetch du payload
+local url = b64d(ENC_URL)
+local ok, src = pcall(function() return game:HttpGet(url) end)
+if not ok or type(src) ~= "string" or #src == 0 then
+    warn("[SiteObfusque] Failed to fetch payload.")
+    return
+end
+
+local fn, err = loadstring(src)
+if not fn then
+    warn("[SiteObfusque] Failed to compile payload: " .. tostring(err))
+    return
+end
+
+fn()
+`;
+
+    // ---------- 6) Upload du loader (Gist public) ----------
+    const loaderGist = await createGist(
+      "SiteObfusque loader",
+      "loader.lua",
+      loader,
+      true
+    );
+
+    // ---------- 7) Réponse Discord ----------
+    const loaderBuffer = Buffer.from(loader, "utf-8");
+    const loaderFile = new AttachmentBuilder(loaderBuffer, { name: "loader.lua" });
+
+    const loadstring =
+      `getgenv().SiteObfusque_Key = "${key.replace(/"/g, '\\"')}"\n` +
+      `loadstring(game:HttpGet("${loaderGist.rawUrl}"))()`;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${EMOJI.yes} Loader Created`)
+      .setColor(0x22c55e)
+      .setDescription(
+        "**Loader open-source** généré ✅\n" +
+        "Ni la **clé** ni la **source** ne sont présentes dedans.\n\n" +
+        "**Loadstring à utiliser :**\n" +
+        "```lua\n" + loadstring + "\n```"
+      )
+      .addFields(
+        { name: "🔑 Key hash (djb2)", value: `\`${keyHash}\``, inline: true },
+        { name: "📦 Payload", value: `${obfuscated.length} chars`, inline: true },
+        { name: "🧠 Obfuscation", value: "VM + strings + flow", inline: true },
+        { name: "🌐 Loader (raw)", value: `\`${loaderGist.rawUrl}\``, inline: false },
+        { name: "📄 Loader (page)", value: `[Open on GitHub](${loaderGist.htmlUrl})`, inline: false }
+      )
+      .setFooter({ text: "SiteObfusque — Loader" });
+
+    await processing.edit({
+      content: "",
+      embeds: [embed],
+      files: [loaderFile],
+    });
+  } catch (e) {
+    console.error("[.loader error]", e);
     await processing.edit(`${EMOJI.no} Error: ${e.message}`);
   }
 }
