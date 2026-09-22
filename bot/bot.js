@@ -197,7 +197,11 @@ client.on("messageCreate", async (message) => {
   if (command === "deobf") return handleDeobf(message);
   if (command === "loader") return handleLoader(message, args);
   if (command === "upload") return handleUpload(message);
-  if (command === "fetch" || command === "raw") return handleFetch(message, args);
+  if (command === "fetch" || command === "raw" || command === "get") {
+    // On passe TOUT le contenu après la commande, pas juste args[0]
+    const fullArg = message.content.slice(PREFIX.length + command.length).trim();
+    return handleFetch(message, fullArg);
+  }
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto") return handleTuto(message);
   if (command === "purge") return handlePurge(message, args);
@@ -219,7 +223,7 @@ async function handleHelp(message) {
       { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script. **Restricted.**" },
       { name: "`.loader [\"<key>\"]`", value: "Create a protected loader. If no key given, one is auto-generated." },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
-      { name: "`.fetch <url>`", value: "Fetch a raw GitHub URL and display its content" },
+      { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring and display its content" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
       { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets (Manage Server required)" },
@@ -269,10 +273,10 @@ async function handleTuto(message) {
           "with the file attached to get a loadstring.",
       },
       {
-        name: "6️⃣  Fetch a raw GitHub link",
+        name: "6️⃣  Fetch a raw script",
         value:
-          "Send:\n```\n.fetch <raw-url>\n```\n" +
-          "The bot will download and display the file content.",
+          "Send:\n```\n.fetch https://raw.githubusercontent.com/...\n```\n" +
+          "or paste a loadstring:\n```\n.fetch loadstring(game:HttpGet(\"https://...\"))()\n```",
       },
       {
         name: "7️⃣  Need help?",
@@ -290,19 +294,63 @@ async function handleTuto(message) {
 }
 
 // ============================================================
-// FETCH — Récupère le contenu d'une URL raw GitHub
+// FETCH — Extrait l'URL d'une loadstring ou d'une URL brute
+// Accepte :
+//   .fetch https://raw.githubusercontent.com/user/repo/main/script.lua
+//   .fetch loadstring(game:HttpGet("https://raw.githubusercontent.com/..."))()
+//   .fetch <n'importe quel texte contenant une URL>
 // ============================================================
-async function handleFetch(message, args) {
-  const url = args[0];
+async function handleFetch(message, input) {
+  input = (input || "").trim();
 
-  if (!url) {
+  // Si rien n'est fourni, on regarde dans les pièces jointes / contenu brut
+  if (!input) {
+    // Cherche une URL dans tout le message (au cas où)
+    const urlInMessage = message.content.match(/https?:\/\/[^\s"'`)\]]+/i);
+    if (urlInMessage) input = urlInMessage[0];
+  }
+
+  if (!input) {
     return message.reply(
-      `${EMOJI.no} Usage: \`.fetch <raw-github-url>\`\n` +
-      `Exemple: \`.fetch https://raw.githubusercontent.com/user/repo/main/script.lua\``
+      `${EMOJI.no} Usage:\n` +
+      "```\n" +
+      ".fetch https://raw.githubusercontent.com/user/repo/main/file.lua\n" +
+      '.fetch loadstring(game:HttpGet("https://raw.githubusercontent.com/..."))()\n' +
+      "```"
     );
   }
 
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+  // ============================================================
+  // EXTRACTION DE L'URL
+  // ============================================================
+  let url = null;
+
+  // 1) Le plus courant : game:HttpGet("URL")
+  const httpGetMatch = input.match(/HttpGet\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/i);
+  if (httpGetMatch) {
+    url = httpGetMatch[1];
+  }
+
+  // 2) Sinon : n'importe quelle URL http(s) dans le texte
+  if (!url) {
+    const anyUrl = input.match(/https?:\/\/[^\s"'`)\]]+/i);
+    if (anyUrl) url = anyUrl[0];
+  }
+
+  // 3) Sinon : si l'input est déjà une URL propre
+  if (!url) {
+    const clean = input.replace(/["'`]/g, "").trim();
+    if (/^https?:\/\/.+/i.test(clean)) url = clean;
+  }
+
+  if (!url) {
+    return message.reply(`${EMOJI.no} Aucune URL valide trouvée dans ton message.`);
+  }
+
+  // Nettoyage final (enlève les caractères parasites en fin d'URL)
+  url = url.replace(/[)\].,;:!?]+$/g, "").trim();
+
+  if (!/^https?:\/\//i.test(url)) {
     return message.reply(`${EMOJI.no} L'URL doit commencer par \`http://\` ou \`https://\`.`);
   }
 
@@ -310,46 +358,98 @@ async function handleFetch(message, args) {
 
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "SiteObfusque-Bot" },
+      headers: { "User-Agent": "SiteObfusque-Bot/1.0" },
     });
 
     if (!res.ok) {
-      return processing.edit(`${EMOJI.no} HTTP ${res.status} — ${res.statusText}`);
+      return processing.edit(
+        `${EMOJI.no} Erreur HTTP **${res.status}** — \`${res.statusText}\`\nURL : \`${url}\``
+      );
     }
 
     const content = await res.text();
 
-    if (content.length > 1800) {
+    if (!content || content.length === 0) {
+      return processing.edit(`${EMOJI.no} Le fichier est vide.`);
+    }
+
+    // Détection du langage
+    const lower = url.toLowerCase();
+    let lang = "";
+    if (lower.endsWith(".lua") || lower.endsWith(".luau")) lang = "lua";
+    else if (lower.endsWith(".js")) lang = "javascript";
+    else if (lower.endsWith(".json")) lang = "json";
+    else if (lower.endsWith(".py")) lang = "python";
+    else if (lower.endsWith(".ts")) lang = "typescript";
+    else if (lower.endsWith(".html")) lang = "html";
+    else if (lower.endsWith(".css")) lang = "css";
+    else if (lower.endsWith(".txt")) lang = "";
+
+    // Limites Discord
+    const MAX_EMBED = 3900;
+
+    // Si trop long → fichier attaché
+    if (content.length > MAX_EMBED) {
       const buffer = Buffer.from(content, "utf-8");
-      const file = new AttachmentBuilder(buffer, { name: "fetched.txt" });
+
+      let ext = "txt";
+      if (lang === "lua") ext = "lua";
+      else if (lang === "javascript") ext = "js";
+      else if (lang === "json") ext = "json";
+      else if (lang === "python") ext = "py";
+
+      const file = new AttachmentBuilder(buffer, { name: `fetched.${ext}` });
 
       const embed = new EmbedBuilder()
-        .setTitle(`${EMOJI.yes} Fetched (fichier joint)`)
+        .setTitle(`${EMOJI.yes} Contenu récupéré`)
         .setColor(0x22c55e)
+        .setDescription(
+          `📄 **${content.length} caractères** — trop long pour être affiché ici.\n` +
+          `🔗 [Lien source](${url})`
+        )
         .addFields(
-          { name: "🔗 URL", value: `\`${url}\``, inline: false },
-          { name: "📏 Taille", value: `${content.length} chars`, inline: true },
-          { name: "📄 Type", value: res.headers.get("content-type") || "unknown", inline: true }
+          {
+            name: "🔗 URL extraite",
+            value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
+            inline: false,
+          }
         )
         .setFooter({ text: "SiteObfusque — fetch" });
+
+      const preview = content.slice(0, 500).replace(/```/g, "``\u200b`");
+      embed.addFields({
+        name: "👁️ Aperçu",
+        value:
+          "```" + (lang || "") + "\n" + preview +
+          (content.length > 500 ? "\n..." : "") + "\n```",
+        inline: false,
+      });
 
       return processing.edit({ content: "", embeds: [embed], files: [file] });
     }
 
+    // Sinon → embed direct
+    const safeContent = content.replace(/```/g, "``\u200b`");
+
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.yes} Fetched`)
+      .setTitle(`${EMOJI.yes} Contenu récupéré`)
       .setColor(0x22c55e)
-      .setDescription(`\`\`\`\n${content}\n\`\`\``)
+      .setDescription("```" + (lang || "") + "\n" + safeContent + "\n```")
       .addFields(
-        { name: "🔗 URL", value: `\`${url}\``, inline: false },
-        { name: "📏 Taille", value: `${content.length} chars`, inline: true }
+        {
+          name: "🔗 URL extraite",
+          value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
+          inline: false,
+        },
+        { name: "📏 Taille", value: `${content.length} caractères`, inline: true },
+        { name: "🌐 Status", value: `HTTP ${res.status}`, inline: true }
       )
       .setFooter({ text: "SiteObfusque — fetch" });
 
     await processing.edit({ content: "", embeds: [embed] });
   } catch (e) {
     console.error("[.fetch error]", e);
-    await processing.edit(`${EMOJI.no} Error: ${e.message}`);
+    await processing.edit(`${EMOJI.no} Erreur : ${e.message}`);
   }
 }
 
