@@ -2,7 +2,8 @@
 const {
   Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField,
-  ChannelType,
+  ChannelType, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require("discord.js");
 const fetch = require("node-fetch");
 const path = require("path");
@@ -23,8 +24,13 @@ const client = new Client({
 const PREFIX = ".";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-// ⚠️ REPLACE WITH YOUR DISCORD ID
-const AUTHORIZED_DEOBF_ID = "1474433573174907054";
+// ============================================================
+// ⚠️ OWNER CONFIG — ONLY THIS USER CAN USE COMMANDS
+// ============================================================
+const OWNER_ID = "1474433573174907054"; // ⚠️ REPLACE WITH YOUR DISCORD ID
+
+// Deobf authorized user (keep separate if you want)
+const AUTHORIZED_DEOBF_ID = OWNER_ID;
 
 const CLYDE_PATH =
   process.env.CLYDE_PATH ||
@@ -39,7 +45,7 @@ const EMOJI = {
 };
 
 // ============================================================
-// PANEL SYSTEM — whitelist roles + scripts
+// PANEL SYSTEM
 // ============================================================
 const PANELS = {
   "code sniper": {
@@ -143,7 +149,7 @@ function resolvePanel(input) {
 }
 
 // ============================================================
-// ROLE NAME HELPER — get role name without pinging
+// ROLE NAME HELPER
 // ============================================================
 async function getRoleName(guild, roleId) {
   try {
@@ -166,16 +172,38 @@ function loadConfig() {
         categoryId: cfg.categoryId || null,
         ticketCounter: cfg.ticketCounter || 0,
         obfChannels: cfg.obfChannels || [],
+        guildConfigs: cfg.guildConfigs || {},
       };
     }
   } catch (e) {
     console.error("[config] load error:", e.message);
   }
-  return { categoryId: null, ticketCounter: 0, obfChannels: [] };
+  return { categoryId: null, ticketCounter: 0, obfChannels: [], guildConfigs: {} };
 }
 
 function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
+function getGuildConfig(guildId) {
+  const cfg = loadConfig();
+  if (!cfg.guildConfigs) cfg.guildConfigs = {};
+  if (!cfg.guildConfigs[guildId]) {
+    cfg.guildConfigs[guildId] = {
+      categoryId: cfg.categoryId || null,
+      obfChannels: cfg.obfChannels || [],
+      ticketCounter: 0,
+    };
+    saveConfig(cfg);
+  }
+  return cfg.guildConfigs[guildId];
+}
+
+function saveGuildConfig(guildId, guildCfg) {
+  const cfg = loadConfig();
+  if (!cfg.guildConfigs) cfg.guildConfigs = {};
+  cfg.guildConfigs[guildId] = guildCfg;
+  saveConfig(cfg);
 }
 
 // ============================================================
@@ -287,21 +315,33 @@ client.once("ready", () => {
   console.log("  ⚡ SiteObfusque Bot");
   console.log("  ────────────────────");
   console.log(`  🤖 ${client.user.tag}`);
+  console.log(`  👑 Owner: ${OWNER_ID}`);
   console.log(`  🧠 Clyde: ${clyde ? "✅" : "❌"}`);
   console.log(`  🔓 ClydeDeobf: ${fs.existsSync(CLYDE_DEOBF_CLI) ? "✅" : "❌"}`);
   console.log(`  🐙 GitHub: ${GITHUB_TOKEN ? "✅" : "❌"}`);
   console.log(`  🎯 Panels: ${Object.keys(PANELS).length}`);
+  console.log(`  🌐 Guilds: ${client.guilds.cache.size}`);
   console.log("");
-  client.user.setActivity("⚡ .help", { type: 3 });
+  client.user.setActivity("⚡ owner-only", { type: 3 });
 });
 
 // ============================================================
-// ROUTER
+// ROUTER — OWNER ONLY
 // ============================================================
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.guild) return;
   if (!message.content.startsWith(PREFIX)) return;
+
+  // ============================================================
+  // 🚫 OWNER-ONLY GATE — blocks everyone except the owner
+  // ============================================================
+  if (message.author.id !== OWNER_ID) {
+    // Silent ignore — no reply, no reaction, nothing.
+    // If you'd rather reply with "you're not allowed", uncomment:
+    // return message.reply(`${EMOJI.no} This bot is owner-only.`);
+    return;
+  }
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const command = args.shift().toLowerCase();
@@ -318,6 +358,9 @@ client.on("messageCreate", async (message) => {
     const fullArg = message.content.slice(PREFIX.length + command.length).trim();
     return handlePanel(message, fullArg);
   }
+  if (command === "realpanel" || command === "rp" || command === "adminpanel") {
+    return handleRealPanel(message);
+  }
   if (command === "w" || command === "whitelist") return handleWhitelist(message, args);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto" || command === "tutorial") return handleTuto(message);
@@ -333,24 +376,25 @@ client.on("messageCreate", async (message) => {
 // ============================================================
 async function handleHelp(message) {
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.yes} SiteObfusque Bot — Commands`)
+    .setTitle(`${EMOJI.yes} SiteObfusque Bot — Commands (Owner Only)`)
     .setColor(0x7c3aed)
     .addFields(
       { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
-      { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script. **Restricted.**" },
-      { name: "`.loader [\"<key>\"]`", value: "Create a protected loader. If no key given, one is auto-generated." },
+      { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script." },
+      { name: "`.loader [\"<key>\"]`", value: "Create a protected loader." },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
       { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring" },
-      { name: "`.panel <code sniper|ap gift|nova visual>`", value: "Show the whitelist panel (fuzzy matching supported)" },
-      { name: "`.w @user|id <sniper|AP|visual>`", value: "Give a whitelist role to a member (Manage Roles required)" },
+      { name: "`.panel <code sniper|ap gift|nova visual>`", value: "Show the whitelist panel (fuzzy matching)" },
+      { name: "`.realpanel`", value: "Open the admin control panel" },
+      { name: "`.w @user|id <sniper|AP|visual>`", value: "Give a whitelist role to a member" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
-      { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
-      { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets (Manage Server required)" },
-      { name: "`.setobfchannels <id1> <id2>`", value: "Set the 2 channels where `.obf` is allowed (Manage Server required)" },
-      { name: "`.ticketchannel`", value: "Send the ticket panel in this channel (Manage Server required)" },
+      { name: "`.purge <1-100>`", value: "Delete N messages" },
+      { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets" },
+      { name: "`.setobfchannels <id1> <id2>`", value: "Set the channels where `.obf` is allowed" },
+      { name: "`.ticketchannel`", value: "Send the ticket panel in this channel" },
       { name: "`.help`", value: "Show this message" }
     )
-    .setFooter({ text: "SiteObfusque" });
+    .setFooter({ text: "SiteObfusque — Owner Only" });
   await message.reply({ embeds: [embed] });
 }
 
@@ -365,13 +409,12 @@ async function handleTuto(message) {
     .addFields(
       { name: "1️⃣  Get your script ready", value: "Save your Lua/Luau script as a `.lua`, `.luau`, or `.txt` file." },
       { name: "2️⃣  Obfuscate it", value: "Go to an authorized channel and send:\n```\n.obf\n```\n**with your file attached.**" },
-      { name: "3️⃣  Deobfuscate a script (restricted)", value: "Send:\n```\n.deobf\n```\nwith the file attached." },
+      { name: "3️⃣  Deobfuscate a script", value: "Send:\n```\n.deobf\n```\nwith the file attached." },
       { name: "4️⃣  Create a protected loader", value: "Send:\n```\n.loader \"your-key\"\n```\nor just `\`.loader\`` (auto-generated key). Attach your file." },
       { name: "5️⃣  Upload it (optional)", value: "Send:\n```\n.upload\n```\nwith the file attached to get a loadstring." },
       { name: "6️⃣  Fetch a raw script", value: "Send:\n```\n.fetch https://raw.githubusercontent.com/...\n```\nor paste a loadstring." },
-      { name: "7️⃣  Open a panel", value: "Send:\n```\n.panel code sniper\n.panel ap gift\n.panel nova visual\n```\n**Fuzzy matching supported** (e.g. `.panel sniper`, `.panel cs`, `.panel vis`)." },
-      { name: "8️⃣  Need help?", value: "Open a ticket with the button in the ticket panel channel." },
-      { name: "⚠️  Rules", value: "• `.obf` only works in authorized channels.\n• Max file size: **500 KB**." }
+      { name: "7️⃣  Open a panel", value: "Send:\n```\n.panel code sniper\n.panel ap gift\n.panel nova visual\n```\n**Fuzzy matching supported**." },
+      { name: "⚠️  Note", value: "All commands are **owner-only**." }
     )
     .setFooter({ text: "SiteObfusque" })
     .setTimestamp();
@@ -380,7 +423,114 @@ async function handleTuto(message) {
 }
 
 // ============================================================
-// PANEL — with fuzzy matching + no role ping
+// REAL PANEL
+// ============================================================
+async function handleRealPanel(message) {
+  const guildCfg = getGuildConfig(message.guild.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🛠️ SiteObfusque — Admin Control Panel")
+    .setColor(0x7c3aed)
+    .setDescription(
+      "Welcome to the **admin control panel**.\n" +
+      "Use the buttons below to manage the bot on this server."
+    )
+    .addFields(
+      {
+        name: "📊 Bot Stats",
+        value:
+          `**Guilds:** ${client.guilds.cache.size}\n` +
+          `**Users:** ${client.users.cache.size}\n` +
+          `**Ping:** ${client.ws.ping}ms\n` +
+          `**Uptime:** ${formatUptime(client.uptime)}`,
+        inline: true,
+      },
+      {
+        name: "🌐 Server Info",
+        value:
+          `**Name:** ${message.guild.name}\n` +
+          `**ID:** \`${message.guild.id}\`\n` +
+          `**Members:** ${message.guild.memberCount}\n` +
+          `**Owner:** <@${message.guild.ownerId}>`,
+        inline: true,
+      },
+      {
+        name: "⚙️ Current Config",
+        value:
+          `**Ticket Category:** ${guildCfg.categoryId ? `<#${guildCfg.categoryId}>` : "*not set*"}\n` +
+          `**Obf Channels:** ${guildCfg.obfChannels && guildCfg.obfChannels.length ? guildCfg.obfChannels.map((id) => `<#${id}>`).join(", ") : "*not set*"}\n` +
+          `**Tickets Created:** ${guildCfg.ticketCounter || 0}`,
+        inline: false,
+      }
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: "SiteObfusque — Admin Panel" })
+    .setTimestamp();
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("rp_config")
+      .setLabel("Server Config")
+      .setEmoji("⚙️")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("rp_ticket")
+      .setLabel("Ticket Panel")
+      .setEmoji("🎫")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("rp_obf")
+      .setLabel("Obf Channels")
+      .setEmoji("🧠")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("rp_stats")
+      .setLabel("Refresh Stats")
+      .setEmoji("🔄")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("rp_guilds")
+      .setLabel("Manage Guilds")
+      .setEmoji("🌐")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("rp_guild_leave")
+      .setLabel("Leave This Server")
+      .setEmoji("🚪")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("rp_reload")
+      .setLabel("Reload Clyde")
+      .setEmoji("🧠")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await message.reply({ embeds: [embed], components: [row1, row2] });
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function formatUptime(ms) {
+  if (!ms) return "unknown";
+  const sec = Math.floor(ms / 1000);
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
+// ============================================================
+// PANEL
 // ============================================================
 async function handlePanel(message, input) {
   const raw = (input || "").trim().toLowerCase();
@@ -400,8 +550,7 @@ async function handlePanel(message, input) {
   if (!panelKey || !PANELS[panelKey]) {
     return message.reply(
       `${EMOJI.no} Unknown panel: \`${input}\`\n` +
-      `Use: \`.panel code sniper\`, \`.panel ap gift\` or \`.panel nova visual\`\n\n` +
-      `💡 The bot also understands typos (e.g. \`.panel sniper\`, \`.panel vis\`, \`.panel cs\`).`
+      `Use: \`.panel code sniper\`, \`.panel ap gift\` or \`.panel nova visual\``
     );
   }
 
@@ -440,13 +589,9 @@ async function handlePanel(message, input) {
 }
 
 // ============================================================
-// WHITELIST — .w @user|id <sniper|AP|visual>
+// WHITELIST
 // ============================================================
 async function handleWhitelist(message, args) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-    return message.reply(`${EMOJI.no} You need \`Manage Roles\` permission.`);
-  }
-
   if (args.length < 2) {
     return message.reply(
       `${EMOJI.no} Usage: \`.w @user|userID <sniper|AP|visual>\`\n\n` +
@@ -554,7 +699,7 @@ async function handleWhitelist(message, args) {
 }
 
 // ============================================================
-// FETCH — Extract URL from a loadstring or raw URL
+// FETCH
 // ============================================================
 async function handleFetch(message, input) {
   input = (input || "").trim();
@@ -697,10 +842,12 @@ async function handleFetch(message, input) {
 // ============================================================
 async function handleObf(message) {
   const cfg = loadConfig();
+  const guildCfg = getGuildConfig(message.guild.id);
+  const obfChannels = guildCfg.obfChannels && guildCfg.obfChannels.length ? guildCfg.obfChannels : cfg.obfChannels;
 
-  if (!cfg.obfChannels.includes(message.channel.id)) {
-    const allowed = cfg.obfChannels.length
-      ? cfg.obfChannels.map((id) => `<#${id}>`).join(", ")
+  if (!obfChannels.includes(message.channel.id)) {
+    const allowed = obfChannels.length
+      ? obfChannels.map((id) => `<#${id}>`).join(", ")
       : "*none configured yet*";
     return message.reply(
       `${EMOJI.no} \`.obf\` is not allowed in this channel.\nAuthorized: ${allowed}`
@@ -769,10 +916,6 @@ async function handleObf(message) {
 // DEOBF
 // ============================================================
 async function handleDeobf(message) {
-  if (message.author.id !== AUTHORIZED_DEOBF_ID) {
-    return message.reply(`${EMOJI.no} You are not authorized to use this command.`);
-  }
-
   if (!fs.existsSync(CLYDE_DEOBF_CLI)) {
     return message.reply(`${EMOJI.no} ClydeDeobf is not installed.`);
   }
@@ -1898,10 +2041,6 @@ async function handleUpload(message) {
 // PURGE
 // ============================================================
 async function handlePurge(message, args) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-    return message.reply(`${EMOJI.no} You need \`Manage Messages\` permission.`);
-  }
-
   const amount = parseInt(args[0], 10);
   if (isNaN(amount) || amount < 1 || amount > 100) {
     return message.reply(`${EMOJI.no} Usage: \`.purge <1-100>\``);
@@ -1923,10 +2062,6 @@ async function handlePurge(message, args) {
 // SETCATEGORYTICKET
 // ============================================================
 async function handleSetCategory(message, args) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
-  }
-
   const id = args[0];
   if (!id || !/^\d{17,20}$/.test(id)) {
     return message.reply(
@@ -1947,6 +2082,9 @@ async function handleSetCategory(message, args) {
   }
 
   const cfg = loadConfig();
+  const guildCfg = getGuildConfig(message.guild.id);
+  guildCfg.categoryId = category.id;
+  saveGuildConfig(message.guild.id, guildCfg);
   cfg.categoryId = category.id;
   saveConfig(cfg);
 
@@ -1962,10 +2100,6 @@ async function handleSetCategory(message, args) {
 // SETOBFCHANNELS
 // ============================================================
 async function handleSetObfChannels(message, args) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
-  }
-
   if (args.length < 1) {
     return message.reply(`${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``);
   }
@@ -1988,6 +2122,9 @@ async function handleSetObfChannels(message, args) {
   }
 
   const cfg = loadConfig();
+  const guildCfg = getGuildConfig(message.guild.id);
+  guildCfg.obfChannels = valid;
+  saveGuildConfig(message.guild.id, guildCfg);
   cfg.obfChannels = valid;
   saveConfig(cfg);
 
@@ -2003,12 +2140,11 @@ async function handleSetObfChannels(message, args) {
 // TICKET PANEL
 // ============================================================
 async function handleTicketPanel(message) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return message.reply(`${EMOJI.no} You need \`Manage Server\` permission.`);
-  }
-
   const cfg = loadConfig();
-  if (!cfg.categoryId) {
+  const guildCfg = getGuildConfig(message.guild.id);
+  const categoryId = guildCfg.categoryId || cfg.categoryId;
+
+  if (!categoryId) {
     return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``);
   }
 
@@ -2094,7 +2230,10 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
 
       const cfg = loadConfig();
-      if (!cfg.categoryId) {
+      const guildCfg = getGuildConfig(interaction.guild.id);
+      const categoryId = guildCfg.categoryId || cfg.categoryId;
+
+      if (!categoryId) {
         return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
       }
 
@@ -2104,7 +2243,7 @@ client.on("interactionCreate", async (interaction) => {
       const existing = guild.channels.cache.find(
         (c) =>
           c.name === `ticket-${user.username.toLowerCase()}` &&
-          c.parentId === cfg.categoryId
+          c.parentId === categoryId
       );
       if (existing) {
         return interaction.editReply(
@@ -2112,13 +2251,13 @@ client.on("interactionCreate", async (interaction) => {
         );
       }
 
-      cfg.ticketCounter = (cfg.ticketCounter || 0) + 1;
-      saveConfig(cfg);
+      guildCfg.ticketCounter = (guildCfg.ticketCounter || 0) + 1;
+      saveGuildConfig(guild.id, guildCfg);
 
       const channel = await guild.channels.create({
         name: `ticket-${user.username.toLowerCase()}`,
         type: ChannelType.GuildText,
-        parent: cfg.categoryId,
+        parent: categoryId,
         permissionOverwrites: [
           {
             id: guild.roles.everyone.id,
