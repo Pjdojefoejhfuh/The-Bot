@@ -29,7 +29,6 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 // ============================================================
 const OWNER_ID = "1474433573174907054"; // ⚠️ REPLACE WITH YOUR DISCORD ID
 
-// Deobf authorized user (keep separate if you want)
 const AUTHORIZED_DEOBF_ID = OWNER_ID;
 
 const CLYDE_PATH =
@@ -333,13 +332,8 @@ client.on("messageCreate", async (message) => {
   if (!message.guild) return;
   if (!message.content.startsWith(PREFIX)) return;
 
-  // ============================================================
-  // 🚫 OWNER-ONLY GATE — blocks everyone except the owner
-  // ============================================================
+  // 🚫 OWNER-ONLY GATE
   if (message.author.id !== OWNER_ID) {
-    // Silent ignore — no reply, no reaction, nothing.
-    // If you'd rather reply with "you're not allowed", uncomment:
-    // return message.reply(`${EMOJI.no} This bot is owner-only.`);
     return;
   }
 
@@ -379,7 +373,7 @@ async function handleHelp(message) {
     .setTitle(`${EMOJI.yes} SiteObfusque Bot — Commands (Owner Only)`)
     .setColor(0x7c3aed)
     .addFields(
-      { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file (only in authorized channels)" },
+      { name: "`.obf`", value: "Obfuscate a `.lua` / `.luau` file" },
       { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script." },
       { name: "`.loader [\"<key>\"]`", value: "Create a protected loader." },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
@@ -469,25 +463,20 @@ async function handleRealPanel(message) {
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("rp_config")
-      .setLabel("Server Config")
-      .setEmoji("⚙️")
-      .setStyle(ButtonStyle.Primary),
+      .setCustomId("rp_refresh")
+      .setLabel("Refresh")
+      .setEmoji("🔄")
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("rp_ticket")
-      .setLabel("Ticket Panel")
+      .setCustomId("rp_ticket_help")
+      .setLabel("Ticket Category")
       .setEmoji("🎫")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId("rp_obf")
+      .setCustomId("rp_obf_help")
       .setLabel("Obf Channels")
       .setEmoji("🧠")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("rp_stats")
-      .setLabel("Refresh Stats")
-      .setEmoji("🔄")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Primary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
@@ -497,15 +486,15 @@ async function handleRealPanel(message) {
       .setEmoji("🌐")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("rp_guild_leave")
-      .setLabel("Leave This Server")
-      .setEmoji("🚪")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
       .setCustomId("rp_reload")
       .setLabel("Reload Clyde")
       .setEmoji("🧠")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("rp_shutdown")
+      .setLabel("Shutdown Bot")
+      .setEmoji("🛑")
+      .setStyle(ButtonStyle.Danger)
   );
 
   await message.reply({ embeds: [embed], components: [row1, row2] });
@@ -2174,7 +2163,161 @@ async function handleTicketPanel(message) {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  // ---- Panel Get Script button ----
+  // ==========================================================
+  // REALPANEL BUTTONS — all respond (fix for "did not respond in time")
+  // ==========================================================
+
+  if (interaction.customId === "rp_refresh") {
+    try {
+      await interaction.deferUpdate();
+      const guildCfg = getGuildConfig(interaction.guild.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle("🛠️ SiteObfusque — Admin Control Panel")
+        .setColor(0x7c3aed)
+        .setDescription(
+          "Welcome to the **admin control panel**.\n" +
+          "Use the buttons below to manage the bot on this server."
+        )
+        .addFields(
+          {
+            name: "📊 Bot Stats",
+            value:
+              `**Guilds:** ${client.guilds.cache.size}\n` +
+              `**Users:** ${client.users.cache.size}\n` +
+              `**Ping:** ${client.ws.ping}ms\n` +
+              `**Uptime:** ${formatUptime(client.uptime)}`,
+            inline: true,
+          },
+          {
+            name: "🌐 Server Info",
+            value:
+              `**Name:** ${interaction.guild.name}\n` +
+              `**ID:** \`${interaction.guild.id}\`\n` +
+              `**Members:** ${interaction.guild.memberCount}\n` +
+              `**Owner:** <@${interaction.guild.ownerId}>`,
+            inline: true,
+          },
+          {
+            name: "⚙️ Current Config",
+            value:
+              `**Ticket Category:** ${guildCfg.categoryId ? `<#${guildCfg.categoryId}>` : "*not set*"}\n` +
+              `**Obf Channels:** ${guildCfg.obfChannels && guildCfg.obfChannels.length ? guildCfg.obfChannels.map((id) => `<#${id}>`).join(", ") : "*not set*"}\n` +
+              `**Tickets Created:** ${guildCfg.ticketCounter || 0}`,
+            inline: false,
+          }
+        )
+        .setThumbnail(client.user.displayAvatarURL())
+        .setFooter({ text: "SiteObfusque — Admin Panel" })
+        .setTimestamp();
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("rp_refresh").setLabel("Refresh").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("rp_ticket_help").setLabel("Ticket Category").setEmoji("🎫").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("rp_obf_help").setLabel("Obf Channels").setEmoji("🧠").setStyle(ButtonStyle.Primary)
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("rp_guilds").setLabel("Manage Guilds").setEmoji("🌐").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("rp_reload").setLabel("Reload Clyde").setEmoji("🧠").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("rp_shutdown").setLabel("Shutdown Bot").setEmoji("🛑").setStyle(ButtonStyle.Danger)
+      );
+
+      await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    } catch (e) {
+      console.error("[rp_refresh]", e);
+    }
+    return;
+  }
+
+  if (interaction.customId === "rp_ticket_help") {
+    await interaction.reply({
+      content:
+        "**🎫 How to set the Ticket Category**\n\n" +
+        "1. Enable **Developer Mode** in Discord settings\n" +
+        "2. Right-click the category you want → **Copy Category ID**\n" +
+        "3. Send: `.setcategoryticket <category-id>`\n\n" +
+        "Then send `.ticketchannel` in the channel where you want the panel.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.customId === "rp_obf_help") {
+    await interaction.reply({
+      content:
+        "**🧠 How to set Obfuscation Channels**\n\n" +
+        "1. Enable **Developer Mode** in Discord settings\n" +
+        "2. Right-click the channel → **Copy Channel ID**\n" +
+        "3. Send: `.setobfchannels <id1> <id2>`\n\n" +
+        "Those are the only channels where `.obf` will work.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.customId === "rp_guilds") {
+    try {
+      const guilds = [...client.guilds.cache.values()].slice(0, 25);
+      const list = guilds
+        .map(
+          (g, i) =>
+            `**${i + 1}.** **${g.name}**\n` +
+            `> 🆔 \`${g.id}\`\n` +
+            `> 👥 \`${g.memberCount}\` members`
+        )
+        .join("\n\n") || "*No guilds*";
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🌐 Guilds (${client.guilds.cache.size})`)
+        .setColor(0x7c3aed)
+        .setDescription(list)
+        .setFooter({ text: "SiteObfusque — Guilds" })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (e) {
+      console.error("[rp_guilds]", e);
+      await interaction.reply({ content: `${EMOJI.no} Error fetching guilds.`, ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.customId === "rp_reload") {
+    await interaction.reply({
+      content: `${EMOJI.loading} Reloading Clyde...`,
+      ephemeral: true,
+    });
+
+    try {
+      const ok = await loadClyde();
+      await interaction.editReply({
+        content: ok
+          ? `${EMOJI.yes} Clyde reloaded successfully.`
+          : `${EMOJI.no} Failed to reload Clyde. Check the console.`,
+      });
+    } catch (e) {
+      console.error("[rp_reload]", e);
+      await interaction.editReply({ content: `${EMOJI.no} Reload failed: ${e.message}` });
+    }
+    return;
+  }
+
+  if (interaction.customId === "rp_shutdown") {
+    await interaction.reply({
+      content: `${EMOJI.no} **Shutting down the bot in 3 seconds...**`,
+      ephemeral: true,
+    });
+
+    setTimeout(() => {
+      console.log("[rp_shutdown] Bot shutting down...");
+      process.exit(0);
+    }, 3000);
+    return;
+  }
+
+  // ==========================================================
+  // PANEL GET SCRIPT
+  // ==========================================================
   if (interaction.customId.startsWith("panel_get_")) {
     const panelKey = interaction.customId.replace("panel_get_", "").replace(/_/g, " ");
     const panel = PANELS[panelKey];
@@ -2183,7 +2326,6 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: `${EMOJI.no} Panel not found.`, ephemeral: true });
     }
 
-    // Check if user has the role
     const member = interaction.member;
     const roleName = await getRoleName(interaction.guild, panel.roleId);
 
@@ -2195,7 +2337,6 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Send script in DM
     try {
       const dmEmbed = new EmbedBuilder()
         .setTitle(`${panel.emoji} ${panel.displayName} — Script`)
@@ -2224,7 +2365,9 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ---- Ticket create ----
+  // ==========================================================
+  // TICKET CREATE
+  // ==========================================================
   if (interaction.customId === "create_ticket") {
     try {
       await interaction.deferReply({ ephemeral: true });
@@ -2259,10 +2402,7 @@ client.on("interactionCreate", async (interaction) => {
         type: ChannelType.GuildText,
         parent: categoryId,
         permissionOverwrites: [
-          {
-            id: guild.roles.everyone.id,
-            deny: [PermissionsBitField.Flags.ViewChannel],
-          },
+          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
           {
             id: user.id,
             allow: [
@@ -2316,7 +2456,9 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ---- Ticket close ----
+  // ==========================================================
+  // TICKET CLOSE
+  // ==========================================================
   if (interaction.customId === "close_ticket") {
     try {
       await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
