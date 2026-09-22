@@ -23,7 +23,7 @@ const client = new Client({
 const PREFIX = ".";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-// ⚠️ REMPLACE PAR TON ID DISCORD
+// ⚠️ REPLACE WITH YOUR DISCORD ID
 const AUTHORIZED_DEOBF_ID = "1474433573174907054";
 
 const CLYDE_PATH =
@@ -39,7 +39,7 @@ const EMOJI = {
 };
 
 // ============================================================
-// PANEL SYSTEM — rôles whitelist + scripts
+// PANEL SYSTEM — whitelist roles + scripts
 // ============================================================
 const PANELS = {
   "code sniper": {
@@ -72,8 +72,7 @@ const PANELS = {
 };
 
 // ============================================================
-// FUZZY MATCHING — trouve le panel le plus proche de l'input
-// Retourne null si aucun match raisonnable
+// FUZZY MATCHING
 // ============================================================
 function levenshtein(a, b) {
   a = a.toLowerCase();
@@ -102,44 +101,32 @@ function levenshtein(a, b) {
   return matrix[b.length][a.length];
 }
 
-// Score : 0 = match parfait, plus grand = moins bon
 function similarityScore(input, keyword) {
   input = input.toLowerCase().trim();
   keyword = keyword.toLowerCase().trim();
 
-  // Match exact
   if (input === keyword) return 0;
-
-  // Input contient le keyword (ex: "panel sniper" contient "sniper")
   if (input.includes(keyword)) return 1;
-
-  // Keyword contient l'input (ex: "sniper" contient "snip")
   if (keyword.includes(input)) return 2;
 
-  // Distance de Levenshtein
   const dist = levenshtein(input, keyword);
   const maxLen = Math.max(input.length, keyword.length);
-
-  // Tolérance : jusqu'à 40% de différence
   const ratio = dist / maxLen;
   if (ratio <= 0.4) return 10 + dist;
 
   return Infinity;
 }
 
-// Trouve le panel correspondant à l'input (avec fuzzy matching)
 function resolvePanel(input) {
   if (!input) return null;
   const cleaned = input.toLowerCase().trim().replace(/\s+/g, " ");
 
-  // 1) Match exact d'abord
   if (PANELS[cleaned]) return cleaned;
 
   let best = null;
   let bestScore = Infinity;
 
   for (const [panelKey, panel] of Object.entries(PANELS)) {
-    // Teste le nom complet du panel
     const candidates = [panelKey, panel.displayName.toLowerCase(), ...panel.keywords];
 
     for (const candidate of candidates) {
@@ -151,9 +138,19 @@ function resolvePanel(input) {
     }
   }
 
-  // Si le meilleur score est acceptable
   if (best && bestScore < Infinity) return best;
   return null;
+}
+
+// ============================================================
+// ROLE NAME HELPER — get role name without pinging
+// ============================================================
+async function getRoleName(guild, roleId) {
+  try {
+    const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId));
+    if (role) return `@${role.name}`;
+  } catch {}
+  return "@Unknown Role";
 }
 
 // ============================================================
@@ -182,7 +179,7 @@ function saveConfig(cfg) {
 }
 
 // ============================================================
-// CHARGEMENT DE CLYDE
+// CLYDE LOADER
 // ============================================================
 let clyde = null;
 
@@ -299,7 +296,7 @@ client.once("ready", () => {
 });
 
 // ============================================================
-// ROUTEUR
+// ROUTER
 // ============================================================
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -323,7 +320,7 @@ client.on("messageCreate", async (message) => {
   }
   if (command === "w" || command === "whitelist") return handleWhitelist(message, args);
   if (command === "help" || command === "aide") return handleHelp(message);
-  if (command === "tuto") return handleTuto(message);
+  if (command === "tuto" || command === "tutorial") return handleTuto(message);
   if (command === "purge") return handlePurge(message, args);
   if (command === "setcategoryticket") return handleSetCategory(message, args);
   if (command === "setobfchannels") return handleSetObfChannels(message, args);
@@ -358,7 +355,7 @@ async function handleHelp(message) {
 }
 
 // ============================================================
-// TUTO PANEL
+// TUTORIAL PANEL
 // ============================================================
 async function handleTuto(message) {
   const embed = new EmbedBuilder()
@@ -372,7 +369,7 @@ async function handleTuto(message) {
       { name: "4️⃣  Create a protected loader", value: "Send:\n```\n.loader \"your-key\"\n```\nor just `\`.loader\`` (auto-generated key). Attach your file." },
       { name: "5️⃣  Upload it (optional)", value: "Send:\n```\n.upload\n```\nwith the file attached to get a loadstring." },
       { name: "6️⃣  Fetch a raw script", value: "Send:\n```\n.fetch https://raw.githubusercontent.com/...\n```\nor paste a loadstring." },
-      { name: "7️⃣  Open a panel", value: "Send:\n```\n.panel code sniper\n.panel ap gift\n.panel nova visual\n```\n**Fuzzy matching supported** (ex: `.panel sniper`, `.panel cs`, `.panel vis`)." },
+      { name: "7️⃣  Open a panel", value: "Send:\n```\n.panel code sniper\n.panel ap gift\n.panel nova visual\n```\n**Fuzzy matching supported** (e.g. `.panel sniper`, `.panel cs`, `.panel vis`)." },
       { name: "8️⃣  Need help?", value: "Open a ticket with the button in the ticket panel channel." },
       { name: "⚠️  Rules", value: "• `.obf` only works in authorized channels.\n• Max file size: **500 KB**." }
     )
@@ -383,7 +380,7 @@ async function handleTuto(message) {
 }
 
 // ============================================================
-// PANEL — avec fuzzy matching
+// PANEL — with fuzzy matching + no role ping
 // ============================================================
 async function handlePanel(message, input) {
   const raw = (input || "").trim().toLowerCase();
@@ -391,7 +388,7 @@ async function handlePanel(message, input) {
   if (!raw) {
     return message.reply(
       `${EMOJI.no} Usage: \`.panel <code sniper | ap gift | nova visual>\`\n\n` +
-      `**Fuzzy matching supported** — tu peux aussi faire :\n` +
+      `**Fuzzy matching supported** — you can also try:\n` +
       `• \`.panel sniper\` / \`.panel cs\` / \`.panel code\`\n` +
       `• \`.panel ap\` / \`.panel gift\`\n` +
       `• \`.panel nova\` / \`.panel visual\` / \`.panel vis\``
@@ -402,9 +399,9 @@ async function handlePanel(message, input) {
 
   if (!panelKey || !PANELS[panelKey]) {
     return message.reply(
-      `${EMOJI.no} Panel inconnu : \`${input}\`\n` +
-      `Utilise : \`.panel code sniper\`, \`.panel ap gift\` ou \`.panel nova visual\`\n\n` +
-      `💡 Le bot comprend aussi les fautes de frappe (ex: \`.panel sniper\`, \`.panel vis\`, \`.panel cs\`).`
+      `${EMOJI.no} Unknown panel: \`${input}\`\n` +
+      `Use: \`.panel code sniper\`, \`.panel ap gift\` or \`.panel nova visual\`\n\n` +
+      `💡 The bot also understands typos (e.g. \`.panel sniper\`, \`.panel vis\`, \`.panel cs\`).`
     );
   }
 
@@ -412,6 +409,7 @@ async function handlePanel(message, input) {
   const member = message.member;
 
   const hasRole = member.roles.cache.has(panel.roleId);
+  const roleName = await getRoleName(message.guild, panel.roleId);
 
   const embed = new EmbedBuilder()
     .setTitle(`${panel.emoji} ${panel.displayName} — Panel`)
@@ -421,10 +419,10 @@ async function handlePanel(message, input) {
       "\n\n" +
       (hasRole
         ? "✅ You are **whitelisted**. Click the button below to receive your script in DM."
-        : `🔒 You need to be whitelisted or have the <@&${panel.roleId}> role to unlock this script.`)
+        : `🔒 You need to be whitelisted or have the **${roleName}** role to unlock this script.`)
     )
     .addFields(
-      { name: "🔐 Required Role", value: `<@&${panel.roleId}>`, inline: true },
+      { name: "🔐 Required Role", value: `**${roleName}**`, inline: true },
       { name: "📬 Delivery", value: "DM (private message)", inline: true }
     )
     .setFooter({ text: "SiteObfusque — Panel" })
@@ -442,7 +440,7 @@ async function handlePanel(message, input) {
 }
 
 // ============================================================
-// WHITELIST — .w @user|id <sniper|AP|visual> (fuzzy)
+// WHITELIST — .w @user|id <sniper|AP|visual>
 // ============================================================
 async function handleWhitelist(message, args) {
   if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
@@ -452,7 +450,7 @@ async function handleWhitelist(message, args) {
   if (args.length < 2) {
     return message.reply(
       `${EMOJI.no} Usage: \`.w @user|userID <sniper|AP|visual>\`\n\n` +
-      `Exemples:\n` +
+      `Examples:\n` +
       `• \`.w @John sniper\`\n` +
       `• \`.w 123456789012345678 visual\`\n` +
       `• \`.w @John AP\``
@@ -471,15 +469,15 @@ async function handleWhitelist(message, args) {
   }
 
   if (!targetId) {
-    return message.reply(`${EMOJI.no} Mentionne un utilisateur ou donne son ID.`);
+    return message.reply(`${EMOJI.no} Mention a user or provide their ID.`);
   }
 
   const panelKey = resolvePanel(roleArg);
 
   if (!panelKey || !PANELS[panelKey]) {
     return message.reply(
-      `${EMOJI.no} Rôle inconnu : \`${roleArg}\`\n` +
-      `Utilise : \`sniper\`, \`AP\` ou \`visual\` (fuzzy matching supporté).`
+      `${EMOJI.no} Unknown role: \`${roleArg}\`\n` +
+      `Use: \`sniper\`, \`AP\` or \`visual\` (fuzzy matching supported).`
     );
   }
 
@@ -489,30 +487,32 @@ async function handleWhitelist(message, args) {
   try {
     target = await message.guild.members.fetch(targetId);
   } catch {
-    return message.reply(`${EMOJI.no} Utilisateur introuvable sur ce serveur.`);
+    return message.reply(`${EMOJI.no} User not found on this server.`);
   }
 
   if (!target) {
-    return message.reply(`${EMOJI.no} Utilisateur introuvable.`);
+    return message.reply(`${EMOJI.no} User not found.`);
   }
 
   let role;
   try {
     role = await message.guild.roles.fetch(panel.roleId);
   } catch {
-    return message.reply(`${EMOJI.no} Le rôle \`${panel.roleId}\` n'existe pas sur ce serveur.`);
+    return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` does not exist on this server.`);
   }
 
   if (!role) {
-    return message.reply(`${EMOJI.no} Le rôle \`${panel.roleId}\` est introuvable.`);
+    return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` could not be found.`);
   }
 
   const botMember = message.guild.members.me;
   if (role.position >= botMember.roles.highest.position) {
     return message.reply(
-      `${EMOJI.no} Je ne peux pas attribuer ce rôle (il est au-dessus du mien dans la hiérarchie).`
+      `${EMOJI.no} I can't assign this role (it's above my highest role in the hierarchy).`
     );
   }
+
+  const roleName = `@${role.name}`;
 
   try {
     if (target.roles.cache.has(panel.roleId)) {
@@ -520,7 +520,7 @@ async function handleWhitelist(message, args) {
         .setTitle(`${EMOJI.yes} Already Whitelisted`)
         .setColor(0xf59e0b)
         .setDescription(
-          `<@${target.id}> a déjà le rôle <@&${panel.roleId}> (**${panel.displayName}**).`
+          `<@${target.id}> already has the **${roleName}** role (**${panel.displayName}**).`
         );
       return message.reply({ embeds: [embed] });
     }
@@ -531,12 +531,12 @@ async function handleWhitelist(message, args) {
       .setTitle(`${EMOJI.yes} Whitelist Successful`)
       .setColor(0x22c55e)
       .setDescription(
-        `<@${target.id}> a reçu le rôle <@&${panel.roleId}> (**${panel.displayName}**).`
+        `<@${target.id}> has received the **${roleName}** role (**${panel.displayName}**).`
       )
       .addFields(
-        { name: "👤 Membre", value: `<@${target.id}> (\`${target.id}\`)`, inline: true },
-        { name: "🎭 Rôle", value: `<@&${panel.roleId}>`, inline: true },
-        { name: "🛡️ Par", value: `<@${message.author.id}>`, inline: true }
+        { name: "👤 Member", value: `<@${target.id}> (\`${target.id}\`)`, inline: true },
+        { name: "🎭 Role", value: `**${roleName}**`, inline: true },
+        { name: "🛡️ By", value: `<@${message.author.id}>`, inline: true }
       )
       .setFooter({ text: "SiteObfusque — Whitelist" })
       .setTimestamp();
@@ -549,12 +549,12 @@ async function handleWhitelist(message, args) {
     ).catch(() => {});
   } catch (e) {
     console.error("[.w error]", e);
-    message.reply(`${EMOJI.no} Erreur lors de l'ajout du rôle : ${e.message}`);
+    message.reply(`${EMOJI.no} Error while adding the role: ${e.message}`);
   }
 }
 
 // ============================================================
-// FETCH
+// FETCH — Extract URL from a loadstring or raw URL
 // ============================================================
 async function handleFetch(message, input) {
   input = (input || "").trim();
@@ -590,13 +590,13 @@ async function handleFetch(message, input) {
   }
 
   if (!url) {
-    return message.reply(`${EMOJI.no} Aucune URL valide trouvée dans ton message.`);
+    return message.reply(`${EMOJI.no} No valid URL found in your message.`);
   }
 
   url = url.replace(/[)\].,;:!?]+$/g, "").trim();
 
   if (!/^https?:\/\//i.test(url)) {
-    return message.reply(`${EMOJI.no} L'URL doit commencer par \`http://\` ou \`https://\`.`);
+    return message.reply(`${EMOJI.no} The URL must start with \`http://\` or \`https://\`.`);
   }
 
   const processing = await message.reply(`${EMOJI.loading} Fetching...`);
@@ -608,14 +608,14 @@ async function handleFetch(message, input) {
 
     if (!res.ok) {
       return processing.edit(
-        `${EMOJI.no} Erreur HTTP **${res.status}** — \`${res.statusText}\`\nURL : \`${url}\``
+        `${EMOJI.no} HTTP Error **${res.status}** — \`${res.statusText}\`\nURL: \`${url}\``
       );
     }
 
     const content = await res.text();
 
     if (!content || content.length === 0) {
-      return processing.edit(`${EMOJI.no} Le fichier est vide.`);
+      return processing.edit(`${EMOJI.no} The file is empty.`);
     }
 
     const lower = url.toLowerCase();
@@ -643,14 +643,14 @@ async function handleFetch(message, input) {
       const file = new AttachmentBuilder(buffer, { name: `fetched.${ext}` });
 
       const embed = new EmbedBuilder()
-        .setTitle(`${EMOJI.yes} Contenu récupéré`)
+        .setTitle(`${EMOJI.yes} Content Retrieved`)
         .setColor(0x22c55e)
         .setDescription(
-          `📄 **${content.length} caractères** — trop long pour être affiché ici.\n` +
-          `🔗 [Lien source](${url})`
+          `📄 **${content.length} characters** — too long to display here.\n` +
+          `🔗 [Source link](${url})`
         )
         .addFields({
-          name: "🔗 URL extraite",
+          name: "🔗 Extracted URL",
           value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
           inline: false,
         })
@@ -658,7 +658,7 @@ async function handleFetch(message, input) {
 
       const preview = content.slice(0, 500).replace(/```/g, "``\u200b`");
       embed.addFields({
-        name: "👁️ Aperçu",
+        name: "👁️ Preview",
         value:
           "```" + (lang || "") + "\n" + preview +
           (content.length > 500 ? "\n..." : "") + "\n```",
@@ -671,16 +671,16 @@ async function handleFetch(message, input) {
     const safeContent = content.replace(/```/g, "``\u200b`");
 
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.yes} Contenu récupéré`)
+      .setTitle(`${EMOJI.yes} Content Retrieved`)
       .setColor(0x22c55e)
       .setDescription("```" + (lang || "") + "\n" + safeContent + "\n```")
       .addFields(
         {
-          name: "🔗 URL extraite",
+          name: "🔗 Extracted URL",
           value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
           inline: false,
         },
-        { name: "📏 Taille", value: `${content.length} caractères`, inline: true },
+        { name: "📏 Size", value: `${content.length} characters`, inline: true },
         { name: "🌐 Status", value: `HTTP ${res.status}`, inline: true }
       )
       .setFooter({ text: "SiteObfusque — fetch" });
@@ -688,7 +688,7 @@ async function handleFetch(message, input) {
     await processing.edit({ content: "", embeds: [embed] });
   } catch (e) {
     console.error("[.fetch error]", e);
-    await processing.edit(`${EMOJI.no} Erreur : ${e.message}`);
+    await processing.edit(`${EMOJI.no} Error: ${e.message}`);
   }
 }
 
@@ -913,11 +913,11 @@ async function handleLoader(message, args) {
     const loadstring = `loadstring(game:HttpGet("${loaderGist.rawUrl}"))()`;
 
     const descriptionParts = [
-      "**Loader open-source avec key system intégré** ✅",
-      "• Si `getgenv().SiteObfusque_Key` est déjà valide → **chargement direct**",
-      "• Sinon → **interface de saisie de clé** s'affiche",
+      "**Open-source loader with built-in key system** ✅",
+      "• If `getgenv().SiteObfusque_Key` is already valid → **direct load**",
+      "• Otherwise → **key input UI** appears",
       "",
-      "**Loadstring :**",
+      "**Loadstring:**",
       "```lua\n" + loadstring + "\n```",
     ];
 
@@ -934,13 +934,13 @@ async function handleLoader(message, args) {
 
     if (keyWasGenerated) {
       embed.addFields({
-        name: "🔑 Clé générée automatiquement",
-        value: "```\n" + key + "\n```\n⚠️ Note-la maintenant, elle ne sera **plus jamais** affichée.",
+        name: "🔑 Auto-generated Key",
+        value: "```\n" + key + "\n```\n⚠️ Save it now, it will **never** be shown again.",
         inline: false,
       });
     } else {
       embed.addFields({
-        name: "🔑 Clé",
+        name: "🔑 Key",
         value: "```\n" + key + "\n```",
         inline: false,
       });
@@ -964,16 +964,16 @@ async function handleLoader(message, args) {
 }
 
 // ============================================================
-// TEMPLATE DU LOADER
+// LOADER TEMPLATE
 // ============================================================
 function buildLoaderTemplate({ keyHash, encodedUrl }) {
   return `--[[
     SiteObfusque Loader (open source)
     ──────────────────────────────────
-    • La clé n'est PAS stockée en clair (seulement son hash djb2)
-    • La source n'est PAS dans ce fichier (payload distant)
-    • Si getgenv().SiteObfusque_Key est valide → chargement direct
-    • Sinon → interface de saisie de clé
+    • The key is NOT stored in plaintext (only its djb2 hash)
+    • The source is NOT in this file (remote payload)
+    • If getgenv().SiteObfusque_Key is valid → direct load
+    • Otherwise → key input UI
 ]]
 
 local KEY_HASH = ${keyHash}
@@ -2038,26 +2038,28 @@ async function handleTicketPanel(message) {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
-  // ---- Bouton Get Script des panels ----
+  // ---- Panel Get Script button ----
   if (interaction.customId.startsWith("panel_get_")) {
     const panelKey = interaction.customId.replace("panel_get_", "").replace(/_/g, " ");
     const panel = PANELS[panelKey];
 
     if (!panel) {
-      return interaction.reply({ content: `${EMOJI.no} Panel introuvable.`, ephemeral: true });
+      return interaction.reply({ content: `${EMOJI.no} Panel not found.`, ephemeral: true });
     }
 
-    // Vérifie que l'utilisateur a le rôle
+    // Check if user has the role
     const member = interaction.member;
+    const roleName = await getRoleName(interaction.guild, panel.roleId);
+
     if (!member.roles.cache.has(panel.roleId)) {
       return interaction.reply({
         content:
-          `${EMOJI.no} **You need to be whitelisted or have the <@&${panel.roleId}> role to unlock this script.**`,
+          `${EMOJI.no} **You need to be whitelisted or have the ${roleName} role to unlock this script.**`,
         ephemeral: true,
       });
     }
 
-    // Envoie le script en DM
+    // Send script in DM
     try {
       const dmEmbed = new EmbedBuilder()
         .setTitle(`${panel.emoji} ${panel.displayName} — Script`)
@@ -2190,7 +2192,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ============================================================
-// DÉMARRAGE
+// STARTUP
 // ============================================================
 (async () => {
   await loadClyde();
