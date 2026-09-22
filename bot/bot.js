@@ -396,7 +396,7 @@ client.once("ready", async () => {
   console.log(`  🎯 Panels: ${Object.keys(PANELS).length}`);
   console.log(`  🌐 Guilds: ${client.guilds.cache.size}`);
   console.log("");
-  client.user.setActivity("⚡ owner-only", { type: 3 });
+  client.user.setActivity("Join for sab script ! : https://discord.gg/zu4nvPNPnk", { type: 3 });
 
   await registerSlashCommands();
 });
