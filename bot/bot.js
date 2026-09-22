@@ -26,7 +26,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 // ============================================================
 // ⚠️ OWNER CONFIG — ONLY THIS USER CAN USE COMMANDS
 // ============================================================
-const OWNER_ID = "1474433573174907054"; // ⚠️ REPLACE WITH YOUR DISCORD ID
+const OWNER_ID = "1474433573174907054";
 
 const AUTHORIZED_DEOBF_ID = OWNER_ID;
 
@@ -42,9 +42,6 @@ const EMOJI = {
   loading: "<a:loading:1549726853424615424>",
 };
 
-// ============================================================
-// UPDATE BANNER IMAGE
-// ============================================================
 const UPDATE_BANNER = "https://cdn.discordapp.com/attachments/000000000000000000/000000000000000000/update.png";
 
 // ============================================================
@@ -81,47 +78,178 @@ const PANELS = {
 };
 
 // ============================================================
-// SPELL CHECKER
+// ADVANCED SPELL CHECKER + PUNCTUATION FIXER
 // ============================================================
+
+// Dictionary: common typos → correct spelling
 const SPELL_FIXES = {
+  // ---- Common English typos ----
   "teh": "the", "recieve": "receive", "seperate": "separate", "occured": "occurred",
-  "definately": "definitely", "neccessary": "necessary", "wich": "which", "adn": "and",
-  "nad": "and", "fo": "of", "ot": "to", "si": "is", "hte": "the", "jsut": "just",
-  "waht": "what", "whta": "what", "taht": "that", "thta": "that", "thier": "their",
-  "wierd": "weird", "acheive": "achieve", "beleive": "believe", "calender": "calendar",
-  "enviroment": "environment", "goverment": "government", "independant": "independent",
-  "publically": "publicly", "recomend": "recommend", "succesful": "successful",
+  "definately": "definitely", "neccessary": "necessary", "necesary": "necessary",
+  "wich": "which", "adn": "and", "nad": "and", "fo": "of", "ot": "to", "si": "is",
+  "hte": "the", "jsut": "just", "waht": "what", "whta": "what", "taht": "that",
+  "thta": "that", "thier": "their", "wierd": "weird", "acheive": "achieve",
+  "beleive": "believe", "calender": "calendar", "enviroment": "environment",
+  "goverment": "government", "independant": "independent", "publically": "publicly",
+  "recomend": "recommend", "succesful": "successful", "sucessful": "successful",
   "tommorow": "tomorrow", "untill": "until", "writting": "writing",
-  "functon": "function", "fucntion": "function", "varible": "variable",
-  "paramter": "parameter", "arguement": "argument", "instace": "instance",
-  "conifg": "config", "confg": "config", "comfig": "config", "sript": "script",
-  "scritp": "script", "snipper": "sniper", "snipr": "sniper", "visul": "visual",
-  "viusal": "visual", "visal": "visual", "visiual": "visual", "updat": "update",
-  "updte": "update", "udpate": "update", "menue": "menu", "injecton": "injection",
-  "injecion": "injection", "executer": "executor", "exector": "executor",
-  "roblxo": "Roblox", "workin": "working", "wokring": "working", "fixd": "fixed",
-  "fixe": "fixed", "fixedd": "fixed", "adde": "added", "addded": "added",
-  "removd": "removed", "removeed": "removed", "improoved": "improved",
-  "imroved": "improved", "optimzed": "optimized", "optimised": "optimized",
-  "stablity": "stability", "stabilty": "stability", "performace": "performance",
-  "perfomance": "performance",
+  "begining": "beginning", "buisness": "business", "commitee": "committee",
+  "embarass": "embarrass", "existance": "existence", "foriegn": "foreign",
+  "freind": "friend", "gaurd": "guard", "happend": "happened",
+  "immediatly": "immediately", "independant": "independent", "knowlege": "knowledge",
+  "liason": "liaison", "maintainance": "maintenance", "mispell": "misspell",
+  "neice": "niece", "noticable": "noticeable", "occassion": "occasion",
+  "persistant": "persistent", "posession": "possession", "prefered": "preferred",
+  "priviledge": "privilege", "questionaire": "questionnaire", "reccomend": "recommend",
+  "refered": "referred", "relevent": "relevant", "religous": "religious",
+  "remeber": "remember", "resistence": "resistance", "sence": "sense",
+  "similiar": "similar", "speach": "speech", "succesfully": "successfully",
+  "supercede": "supersede", "surprize": "surprise", "tendancy": "tendency",
+  "therefor": "therefore", "threshhold": "threshold", "tommorrow": "tomorrow",
+  "truely": "truly", "unforseen": "unforeseen", "unfortunatly": "unfortunately",
+  "usualy": "usually", "vaccuum": "vacuum", "vegtable": "vegetable",
+  "vehical": "vehicle", "visable": "visible", "wether": "whether",
+  "wich": "which", "withold": "withhold", "writen": "written",
+
+  // ---- Dev / script specific typos ----
+  "functon": "function", "fucntion": "function", "funtion": "function",
+  "varible": "variable", "varable": "variable", "paramter": "parameter",
+  "arguement": "argument", "instace": "instance", "instancee": "instance",
+  "conifg": "config", "confg": "config", "comfig": "config", "cofnig": "config",
+  "sript": "script", "scritp": "script", "scirpt": "script", "scrip": "script",
+  "snipper": "sniper", "snipr": "sniper", "snipe": "sniper", "snipperr": "sniper",
+  "visul": "visual", "viusal": "visual", "visal": "visual", "visiual": "visual",
+  "visuall": "visual", "visuals": "visuals",
+  "updat": "update", "updte": "update", "udpate": "update", "upadte": "update",
+  "menue": "menu", "menuu": "menu", "mennu": "menu", "menuee": "menu",
+  "injecton": "injection", "injecion": "injection", "injectin": "injection",
+  "executer": "executor", "exector": "executor", "executr": "executor",
+  "roblxo": "Roblox", "roblx": "Roblox",
+  "workin": "working", "wokring": "working", "workng": "working",
+  "fixd": "fixed", "fixe": "fixed", "fixedd": "fixed", "fied": "fixed",
+  "fixa": "fixed", "fixaid": "fixed", "fixxed": "fixed", "fixeed": "fixed",
+  "fxied": "fixed", "fised": "fixed",
+  "adde": "added", "addded": "added", "addd": "added", "aded": "added",
+  "removd": "removed", "removeed": "removed", "removedd": "removed",
+  "improoved": "improved", "imroved": "improved", "imrpoved": "improved",
+  "optimzed": "optimized", "optimised": "optimized", "optmized": "optimized",
+  "stablity": "stability", "stabilty": "stability", "stabilty": "stability",
+  "performace": "performance", "perfomance": "performance", "performence": "performance",
+  "intialize": "initialize", "intiliaze": "initialize",
+  "acknowledgement": "acknowledgment",
+  "seperate": "separate",
+  "occured": "occurred",
+
+  // ---- Verbs / actions ----
+  "creat": "create", "creatd": "created", "creaeted": "created",
+  "delte": "delete", "delet": "delete", "deleet": "delete",
+  "modifiy": "modify", "modifed": "modified",
+  "upgrad": "upgrade", "upgraded": "upgraded",
+  "instal": "install", "instaled": "installed",
+  "restar": "restart", "restared": "restarted",
+  "updatd": "updated", "uptaded": "updated",
+  "tweek": "tweak", "tweaked": "tweaked",
+  "patched": "patched", "patchd": "patched",
+
+  // ---- Misc words ----
+  "becuase": "because", "becasue": "because", "becaus": "because",
+  "agains": "against", "agianst": "against",
+  "alot": "a lot", "definitly": "definitely", "excatly": "exactly",
+  "finaly": "finally", "generaly": "generally", "greatly": "greatly",
+  "heigth": "height", "lenght": "length", "widht": "width",
+  "realy": "really", "realy": "really", "reali": "really",
+  "sucess": "success", "succes": "success",
+  "temp": "temporary", "tmp": "temp",
+  "utils": "utilities", "util": "utility",
+  "libary": "library", "librairy": "library",
+  "moduel": "module", "modul": "module",
+  "verison": "version", "versoin": "version",
+  "buid": "build", "buiild": "build",
+  "feild": "field", "filed": "field",
+  "protocole": "protocol", "protocal": "protocol",
+  "authentification": "authentication",
+  "authorisation": "authorization",
+  "availible": "available", "availabe": "available",
+  "compatibilty": "compatibility", "compatable": "compatible",
+  "dependancy": "dependency", "dependancy": "dependency",
+  "immediatly": "immediately", "insted": "instead",
+  "originaly": "originally", "origional": "original",
+  "recieved": "received", "recieving": "receiving",
+  "seperated": "separated", "seperately": "separately",
+  "sucessfully": "successfully",
+  "throught": "through", "thoughout": "throughout",
+  "transffered": "transferred", "transfered": "transferred",
+  "udpated": "updated", "updted": "updated",
+  "useable": "usable", "useage": "usage",
+  "writting": "writing", "writen": "written",
 };
 
-function fixTypos(text) {
-  let result = text;
-  const words = result.split(/\b/);
-  for (let i = 0; i < words.length; i++) {
-    const lower = words[i].toLowerCase();
-    if (SPELL_FIXES[lower]) {
-      if (words[i][0] === words[i][0].toUpperCase()) {
-        words[i] = SPELL_FIXES[lower].charAt(0).toUpperCase() + SPELL_FIXES[lower].slice(1);
-      } else {
-        words[i] = SPELL_FIXES[lower];
-      }
+// Words that should always be capitalized
+const ALWAYS_CAPITALIZED = ["i", "i'm", "i've", "i'll", "i'd"];
+
+// Function: correct a single word using dictionary + Levenshtein fallback
+function correctWord(word) {
+  const lower = word.toLowerCase();
+
+  // Exact dictionary match
+  if (SPELL_FIXES[lower]) {
+    const fix = SPELL_FIXES[lower];
+    // Preserve capitalization
+    if (word === word.toUpperCase() && word.length > 1) return fix.toUpperCase();
+    if (word[0] === word[0].toUpperCase()) return fix.charAt(0).toUpperCase() + fix.slice(1);
+    return fix;
+  }
+
+  // Always-capitalize words
+  if (ALWAYS_CAPITALIZED.includes(lower)) {
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+
+  // Skip short words (< 4 chars) to avoid over-correcting
+  if (lower.length < 4) return word;
+
+  // Skip words that look like code (contain no vowels, or all caps)
+  if (/[0-9_]/.test(lower)) return word;
+  if (/^[A-Z]+$/.test(word)) return word;
+  if (!/[aeiouy]/.test(lower)) return word;
+
+  // Levenshtein fallback: find closest dictionary word
+  let best = null;
+  let bestDist = Infinity;
+  for (const key of Object.keys(SPELL_FIXES)) {
+    const dist = levenshtein(lower, key);
+    const maxLen = Math.max(lower.length, key.length);
+    const ratio = dist / maxLen;
+    // Tolerance: 1 error per 4 chars
+    const threshold = Math.max(1, Math.floor(lower.length / 4));
+    if (dist <= threshold && dist < bestDist) {
+      bestDist = dist;
+      best = key;
     }
   }
-  result = words.join("");
 
+  if (best) {
+    const fix = SPELL_FIXES[best];
+    if (word[0] === word[0].toUpperCase()) return fix.charAt(0).toUpperCase() + fix.slice(1);
+    return fix;
+  }
+
+  return word;
+}
+
+// Function: correct the whole sentence
+function fixTypos(text) {
+  if (!text) return text;
+
+  let result = String(text);
+
+  // 1. Normalize whitespace
+  result = result.replace(/\s+/g, " ").trim();
+
+  // 2. Fix each word
+  result = result.replace(/\b[a-zA-Z']+\b/g, (word) => correctWord(word));
+
+  // 3. Fix common multi-word typos
   result = result
     .replace(/\bwith out\b/gi, "without")
     .replace(/\bcan not\b/gi, "cannot")
@@ -132,15 +260,31 @@ function fixTypos(text) {
     .replace(/\bare not\b/gi, "aren't")
     .replace(/\bhas been fixed\b/gi, "fixed")
     .replace(/\bhas been added\b/gi, "added")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/\bhas been removed\b/gi, "removed")
+    .replace(/\bthe the\b/gi, "the")
+    .replace(/\ba a\b/gi, "a")
+    .replace(/\band and\b/gi, "and")
+    .replace(/\bto to\b/gi, "to")
+    .replace(/\bof of\b/gi, "of");
 
-  if (result.length > 0) {
-    result = result.charAt(0).toUpperCase() + result.slice(1);
+  // 4. Capitalize first letter of the sentence
+  result = result.charAt(0).toUpperCase() + result.slice(1);
+
+  // 5. Add final period if missing (only if no punctuation at the end)
+  if (result.length > 0 && !/[.!?;:,]$/.test(result.trim())) {
+    // Don't add period if it looks like a short tag
+    if (result.length > 10) {
+      result = result.trim() + ".";
+    }
   }
+
+  // 6. Capitalize after periods
+  result = result.replace(/([.!?]\s+)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase());
+
   return result;
 }
 
+// Function: add smart prefixes (Fixed / Added / etc.)
 function smartPrefix(line) {
   const lower = line.toLowerCase().trim();
 
@@ -157,7 +301,7 @@ function smartPrefix(line) {
 }
 
 // ============================================================
-// FUZZY MATCHING
+// FUZZY MATCHING (for panels)
 // ============================================================
 function levenshtein(a, b) {
   a = a.toLowerCase(); b = b.toLowerCase();
@@ -352,7 +496,7 @@ async function createGist(description, filename, content, isPublic = true) {
 }
 
 // ============================================================
-// SLASH COMMANDS REGISTRATION
+// SLASH COMMANDS
 // ============================================================
 const SLASH_COMMANDS = [
   new SlashCommandBuilder()
@@ -459,7 +603,7 @@ async function handleUpdate(message, input) {
       "```\n" +
       "**Example:**\n" +
       "```\n" +
-      ".update 2.4 | fixed code sniper ; fixed the menu ; added new UI\n" +
+      ".update 2.4 | fixaid the mennue ; adde new featur ; optimzed the code\n" +
       "```"
     );
   }
@@ -481,7 +625,12 @@ async function handleUpdate(message, input) {
   const rawLines = changelogRaw.split(/[;\n]/).map((l) => l.trim()).filter((l) => l.length > 0);
   if (rawLines.length === 0) return message.reply(`${EMOJI.no} No valid changelog lines found.`);
 
-  const fixedLines = rawLines.map((line) => smartPrefix(fixTypos(line)));
+  // 1. Fix typos + punctuation  2. Add smart prefix
+  const fixedLines = rawLines.map((line) => {
+    const corrected = fixTypos(line);
+    return smartPrefix(corrected);
+  });
+
   const versionDisplay = /^[a-z]/i.test(version) ? version : `Nova ${version}`;
   const changelogText = fixedLines.map((l) => `+ ${l}`).join("\n");
 
@@ -518,7 +667,6 @@ async function handleUpdate(message, input) {
 // SLASH /update HANDLER
 // ============================================================
 async function handleSlashUpdate(interaction) {
-  // Owner only
   if (interaction.user.id !== OWNER_ID) {
     return interaction.reply({
       content: `${EMOJI.no} Only the bot owner can use this command.`,
@@ -537,7 +685,11 @@ async function handleSlashUpdate(interaction) {
     });
   }
 
-  const fixedLines = rawLines.map((line) => smartPrefix(fixTypos(line)));
+  const fixedLines = rawLines.map((line) => {
+    const corrected = fixTypos(line);
+    return smartPrefix(corrected);
+  });
+
   const versionDisplay = /^[a-z]/i.test(version) ? version : `Nova ${version}`;
   const changelogText = fixedLines.map((l) => `+ ${l}`).join("\n");
 
@@ -584,7 +736,7 @@ async function handleHelp(message) {
       { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring" },
       { name: "`.panel <code sniper|ap gift|nova visual>`", value: "Show the whitelist panel (fuzzy matching)" },
       { name: "`.realpanel`", value: "Open the admin control panel" },
-      { name: "`.update <version> | <lines>`", value: "Post a styled update panel (owner only)" },
+      { name: "`.update <version> | <lines>`", value: "Post a styled update panel with auto spellcheck (owner only)" },
       { name: "/update", value: "Slash version of `.update` (owner only)" },
       { name: "`.w @user|id <sniper|AP|visual>`", value: "Give a whitelist role to a member" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
@@ -1158,7 +1310,7 @@ async function handleLoader(message, args) {
 }
 
 // ============================================================
-// LOADER TEMPLATE (unchanged)
+// LOADER TEMPLATE
 // ============================================================
 function buildLoaderTemplate({ keyHash, encodedUrl }) {
   return `--[[
@@ -2200,9 +2352,6 @@ async function handleTicketPanel(message) {
 // INTERACTIONS
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
-  // ==========================================================
-  // SLASH COMMANDS
-  // ==========================================================
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "update") {
       return handleSlashUpdate(interaction);
@@ -2212,9 +2361,6 @@ client.on("interactionCreate", async (interaction) => {
 
   if (!interaction.isButton()) return;
 
-  // ==========================================================
-  // UPDATE ACK
-  // ==========================================================
   if (interaction.customId === "update_ack") {
     return interaction.reply({
       content: `${EMOJI.yes} Thanks for confirming!`,
@@ -2222,9 +2368,6 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ==========================================================
-  // REALPANEL BUTTONS
-  // ==========================================================
   if (interaction.customId === "rp_refresh") {
     try {
       await interaction.deferUpdate();
@@ -2355,9 +2498,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ==========================================================
-  // PANEL GET SCRIPT
-  // ==========================================================
   if (interaction.customId.startsWith("panel_get_")) {
     const panelKey = interaction.customId.replace("panel_get_", "").replace(/_/g, " ");
     const panel = PANELS[panelKey];
@@ -2394,9 +2534,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ==========================================================
-  // TICKET CREATE
-  // ==========================================================
   if (interaction.customId === "create_ticket") {
     try {
       await interaction.deferReply({ ephemeral: true });
@@ -2463,9 +2600,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ==========================================================
-  // TICKET CLOSE
-  // ==========================================================
   if (interaction.customId === "close_ticket") {
     try {
       await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
