@@ -2,8 +2,7 @@
 const {
   Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField,
-  ChannelType, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
-  ModalBuilder, TextInputBuilder, TextInputStyle,
+  ChannelType, SlashCommandBuilder, REST, Routes,
 } = require("discord.js");
 const fetch = require("node-fetch");
 const path = require("path");
@@ -44,6 +43,11 @@ const EMOJI = {
 };
 
 // ============================================================
+// UPDATE BANNER IMAGE
+// ============================================================
+const UPDATE_BANNER = "https://cdn.discordapp.com/attachments/000000000000000000/000000000000000000/update.png";
+
+// ============================================================
 // PANEL SYSTEM
 // ============================================================
 const PANELS = {
@@ -77,11 +81,86 @@ const PANELS = {
 };
 
 // ============================================================
+// SPELL CHECKER
+// ============================================================
+const SPELL_FIXES = {
+  "teh": "the", "recieve": "receive", "seperate": "separate", "occured": "occurred",
+  "definately": "definitely", "neccessary": "necessary", "wich": "which", "adn": "and",
+  "nad": "and", "fo": "of", "ot": "to", "si": "is", "hte": "the", "jsut": "just",
+  "waht": "what", "whta": "what", "taht": "that", "thta": "that", "thier": "their",
+  "wierd": "weird", "acheive": "achieve", "beleive": "believe", "calender": "calendar",
+  "enviroment": "environment", "goverment": "government", "independant": "independent",
+  "publically": "publicly", "recomend": "recommend", "succesful": "successful",
+  "tommorow": "tomorrow", "untill": "until", "writting": "writing",
+  "functon": "function", "fucntion": "function", "varible": "variable",
+  "paramter": "parameter", "arguement": "argument", "instace": "instance",
+  "conifg": "config", "confg": "config", "comfig": "config", "sript": "script",
+  "scritp": "script", "snipper": "sniper", "snipr": "sniper", "visul": "visual",
+  "viusal": "visual", "visal": "visual", "visiual": "visual", "updat": "update",
+  "updte": "update", "udpate": "update", "menue": "menu", "injecton": "injection",
+  "injecion": "injection", "executer": "executor", "exector": "executor",
+  "roblxo": "Roblox", "workin": "working", "wokring": "working", "fixd": "fixed",
+  "fixe": "fixed", "fixedd": "fixed", "adde": "added", "addded": "added",
+  "removd": "removed", "removeed": "removed", "improoved": "improved",
+  "imroved": "improved", "optimzed": "optimized", "optimised": "optimized",
+  "stablity": "stability", "stabilty": "stability", "performace": "performance",
+  "perfomance": "performance",
+};
+
+function fixTypos(text) {
+  let result = text;
+  const words = result.split(/\b/);
+  for (let i = 0; i < words.length; i++) {
+    const lower = words[i].toLowerCase();
+    if (SPELL_FIXES[lower]) {
+      if (words[i][0] === words[i][0].toUpperCase()) {
+        words[i] = SPELL_FIXES[lower].charAt(0).toUpperCase() + SPELL_FIXES[lower].slice(1);
+      } else {
+        words[i] = SPELL_FIXES[lower];
+      }
+    }
+  }
+  result = words.join("");
+
+  result = result
+    .replace(/\bwith out\b/gi, "without")
+    .replace(/\bcan not\b/gi, "cannot")
+    .replace(/\bwill not\b/gi, "won't")
+    .replace(/\bdo not\b/gi, "don't")
+    .replace(/\bdid not\b/gi, "didn't")
+    .replace(/\bis not\b/gi, "isn't")
+    .replace(/\bare not\b/gi, "aren't")
+    .replace(/\bhas been fixed\b/gi, "fixed")
+    .replace(/\bhas been added\b/gi, "added")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (result.length > 0) {
+    result = result.charAt(0).toUpperCase() + result.slice(1);
+  }
+  return result;
+}
+
+function smartPrefix(line) {
+  const lower = line.toLowerCase().trim();
+
+  if (/^(fixed|added|removed|improved|optimized|updated|rewrote|reduced|increased|changed|reworked|patched|disabled|enabled|replaced|reverted)/i.test(lower)) {
+    return line;
+  }
+
+  if (/(bug|error|crash|issue|problem|glitch|leak)/i.test(lower)) return "Fixed " + line;
+  if (/(new|feature|option|button|menu|system|support|keybind|config)/i.test(lower)) return "Added " + line;
+  if (/(remove|delete)/i.test(lower)) return "Removed " + line;
+  if (/(faster|speed|optimi|performance)/i.test(lower)) return "Optimized " + line;
+
+  return line;
+}
+
+// ============================================================
 // FUZZY MATCHING
 // ============================================================
 function levenshtein(a, b) {
-  a = a.toLowerCase();
-  b = b.toLowerCase();
+  a = a.toLowerCase(); b = b.toLowerCase();
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -92,15 +171,8 @@ function levenshtein(a, b) {
 
   for (let i = 1; i <= b.length; i++) {
     for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
     }
   }
   return matrix[b.length][a.length];
@@ -109,40 +181,30 @@ function levenshtein(a, b) {
 function similarityScore(input, keyword) {
   input = input.toLowerCase().trim();
   keyword = keyword.toLowerCase().trim();
-
   if (input === keyword) return 0;
   if (input.includes(keyword)) return 1;
   if (keyword.includes(input)) return 2;
-
   const dist = levenshtein(input, keyword);
   const maxLen = Math.max(input.length, keyword.length);
   const ratio = dist / maxLen;
   if (ratio <= 0.4) return 10 + dist;
-
   return Infinity;
 }
 
 function resolvePanel(input) {
   if (!input) return null;
   const cleaned = input.toLowerCase().trim().replace(/\s+/g, " ");
-
   if (PANELS[cleaned]) return cleaned;
 
   let best = null;
   let bestScore = Infinity;
-
   for (const [panelKey, panel] of Object.entries(PANELS)) {
     const candidates = [panelKey, panel.displayName.toLowerCase(), ...panel.keywords];
-
     for (const candidate of candidates) {
       const score = similarityScore(cleaned, candidate);
-      if (score < bestScore) {
-        bestScore = score;
-        best = panelKey;
-      }
+      if (score < bestScore) { bestScore = score; best = panelKey; }
     }
   }
-
   if (best && bestScore < Infinity) return best;
   return null;
 }
@@ -246,7 +308,6 @@ async function obfuscateSource(source, options = {}) {
   } else {
     output = clyde.printChunk(obfuscated);
   }
-
   return output;
 }
 
@@ -256,21 +317,15 @@ function runClydeDeobf(inputCode) {
     const tempOutput = path.join(__dirname, "temp_deobf_output.lua");
 
     fs.writeFileSync(tempInput, inputCode, "utf-8");
-
     const cmd = `node "${CLYDE_DEOBF_CLI}" "${tempInput}" -o "${tempOutput}"`;
 
     exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
       if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
-
       if (error) {
         if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
         return reject(new Error(stderr || error.message));
       }
-
-      if (!fs.existsSync(tempOutput)) {
-        return reject(new Error("ClydeDeobf produced no output file."));
-      }
-
+      if (!fs.existsSync(tempOutput)) return reject(new Error("ClydeDeobf produced no output file."));
       const result = fs.readFileSync(tempOutput, "utf-8");
       fs.unlinkSync(tempOutput);
       resolve(result);
@@ -286,30 +341,50 @@ async function createGist(description, filename, content, isPublic = true) {
       Accept: "application/vnd.github+json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      description,
-      public: isPublic,
-      files: { [filename]: { content } },
-    }),
+    body: JSON.stringify({ description, public: isPublic, files: { [filename]: { content } } }),
   });
 
   const gist = await res.json();
-  if (!res.ok) {
-    throw new Error(gist.message || "GitHub Gist error");
-  }
+  if (!res.ok) throw new Error(gist.message || "GitHub Gist error");
 
   const fileKey = Object.keys(gist.files)[0];
-  return {
-    id: gist.id,
-    htmlUrl: gist.html_url,
-    rawUrl: gist.files[fileKey].raw_url,
-  };
+  return { id: gist.id, htmlUrl: gist.html_url, rawUrl: gist.files[fileKey].raw_url };
+}
+
+// ============================================================
+// SLASH COMMANDS REGISTRATION
+// ============================================================
+const SLASH_COMMANDS = [
+  new SlashCommandBuilder()
+    .setName("update")
+    .setDescription("Post a styled update panel (owner only)")
+    .addStringOption((opt) =>
+      opt.setName("version").setDescription("Version number (e.g. 2.4)").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("changelog")
+        .setDescription("Changelog lines separated by ; (e.g. fixed bug; added menu)")
+        .setRequired(true)
+    )
+    .toJSON(),
+];
+
+async function registerSlashCommands() {
+  if (!process.env.DISCORD_TOKEN || !client.user) return;
+  try {
+    const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+    await rest.put(Routes.applicationCommands(client.user.id), { body: SLASH_COMMANDS });
+    console.log("[OK] Slash commands registered globally.");
+  } catch (e) {
+    console.error("[ERROR] Failed to register slash commands:", e.message);
+  }
 }
 
 // ============================================================
 // READY
 // ============================================================
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log("");
   console.log("  ⚡ SiteObfusque Bot");
   console.log("  ────────────────────");
@@ -322,6 +397,8 @@ client.once("ready", () => {
   console.log(`  🌐 Guilds: ${client.guilds.cache.size}`);
   console.log("");
   client.user.setActivity("⚡ owner-only", { type: 3 });
+
+  await registerSlashCommands();
 });
 
 // ============================================================
@@ -332,10 +409,7 @@ client.on("messageCreate", async (message) => {
   if (!message.guild) return;
   if (!message.content.startsWith(PREFIX)) return;
 
-  // 🚫 OWNER-ONLY GATE
-  if (message.author.id !== OWNER_ID) {
-    return;
-  }
+  if (message.author.id !== OWNER_ID) return;
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const command = args.shift().toLowerCase();
@@ -355,6 +429,10 @@ client.on("messageCreate", async (message) => {
   if (command === "realpanel" || command === "rp" || command === "adminpanel") {
     return handleRealPanel(message);
   }
+  if (command === "update" || command === "uptade") {
+    const fullArg = message.content.slice(PREFIX.length + command.length).trim();
+    return handleUpdate(message, fullArg);
+  }
   if (command === "w" || command === "whitelist") return handleWhitelist(message, args);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto" || command === "tutorial") return handleTuto(message);
@@ -364,6 +442,132 @@ client.on("messageCreate", async (message) => {
   if (command === "ticketchannel" || command === "tickerchannel")
     return handleTicketPanel(message);
 });
+
+// ============================================================
+// UPDATE (prefix) — owner only
+// ============================================================
+async function handleUpdate(message, input) {
+  if (message.author.id !== OWNER_ID) {
+    return message.reply(`${EMOJI.no} Only the bot owner can use this command.`);
+  }
+
+  if (!input || !input.trim()) {
+    return message.reply(
+      `${EMOJI.no} Usage:\n` +
+      "```\n" +
+      ".update <version> | <line1> ; <line2> ; <line3>\n" +
+      "```\n" +
+      "**Example:**\n" +
+      "```\n" +
+      ".update 2.4 | fixed code sniper ; fixed the menu ; added new UI\n" +
+      "```"
+    );
+  }
+
+  const pipeIndex = input.indexOf("|");
+  if (pipeIndex === -1) {
+    return message.reply(
+      `${EMOJI.no} Missing separator \`|\`.\n` +
+      `Format: \`.update <version> | <line1> ; <line2> ; <line3>\``
+    );
+  }
+
+  const version = input.slice(0, pipeIndex).trim();
+  const changelogRaw = input.slice(pipeIndex + 1).trim();
+
+  if (!version) return message.reply(`${EMOJI.no} You must provide a version number (e.g. \`2.4\`).`);
+  if (!changelogRaw) return message.reply(`${EMOJI.no} You must provide at least one changelog line.`);
+
+  const rawLines = changelogRaw.split(/[;\n]/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (rawLines.length === 0) return message.reply(`${EMOJI.no} No valid changelog lines found.`);
+
+  const fixedLines = rawLines.map((line) => smartPrefix(fixTypos(line)));
+  const versionDisplay = /^[a-z]/i.test(version) ? version : `Nova ${version}`;
+  const changelogText = fixedLines.map((l) => `+ ${l}`).join("\n");
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${EMOJI.yes} ${versionDisplay}`)
+    .setColor(0x22c55e)
+    .setDescription(
+      "```diff\n" +
+      `+ Update ${versionDisplay}\n` +
+      "```\n" +
+      `**Changelog:**\n` +
+      "```diff\n" +
+      changelogText +
+      "\n```"
+    )
+    .setImage(UPDATE_BANNER)
+    .setFooter({ text: `Posted by ${message.author.tag} • SiteObfusque` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("update_ack")
+      .setLabel("Got it!")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  await message.channel.send({ embeds: [embed], components: [row] });
+
+  try { await message.delete(); } catch {}
+}
+
+// ============================================================
+// SLASH /update HANDLER
+// ============================================================
+async function handleSlashUpdate(interaction) {
+  // Owner only
+  if (interaction.user.id !== OWNER_ID) {
+    return interaction.reply({
+      content: `${EMOJI.no} Only the bot owner can use this command.`,
+      ephemeral: true,
+    });
+  }
+
+  const version = interaction.options.getString("version", true).trim();
+  const changelogRaw = interaction.options.getString("changelog", true).trim();
+
+  const rawLines = changelogRaw.split(/[;\n]/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (rawLines.length === 0) {
+    return interaction.reply({
+      content: `${EMOJI.no} No valid changelog lines found.`,
+      ephemeral: true,
+    });
+  }
+
+  const fixedLines = rawLines.map((line) => smartPrefix(fixTypos(line)));
+  const versionDisplay = /^[a-z]/i.test(version) ? version : `Nova ${version}`;
+  const changelogText = fixedLines.map((l) => `+ ${l}`).join("\n");
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${EMOJI.yes} ${versionDisplay}`)
+    .setColor(0x22c55e)
+    .setDescription(
+      "```diff\n" +
+      `+ Update ${versionDisplay}\n` +
+      "```\n" +
+      `**Changelog:**\n` +
+      "```diff\n" +
+      changelogText +
+      "\n```"
+    )
+    .setImage(UPDATE_BANNER)
+    .setFooter({ text: `Posted by ${interaction.user.tag} • SiteObfusque` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("update_ack")
+      .setLabel("Got it!")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  await interaction.reply({ content: `${EMOJI.yes} Update posted!`, ephemeral: true });
+  await interaction.channel.send({ embeds: [embed], components: [row] });
+}
 
 // ============================================================
 // HELP
@@ -380,6 +584,8 @@ async function handleHelp(message) {
       { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring" },
       { name: "`.panel <code sniper|ap gift|nova visual>`", value: "Show the whitelist panel (fuzzy matching)" },
       { name: "`.realpanel`", value: "Open the admin control panel" },
+      { name: "`.update <version> | <lines>`", value: "Post a styled update panel (owner only)" },
+      { name: "/update", value: "Slash version of `.update` (owner only)" },
       { name: "`.w @user|id <sniper|AP|visual>`", value: "Give a whitelist role to a member" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages" },
@@ -462,39 +668,15 @@ async function handleRealPanel(message) {
     .setTimestamp();
 
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("rp_refresh")
-      .setLabel("Refresh")
-      .setEmoji("🔄")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("rp_ticket_help")
-      .setLabel("Ticket Category")
-      .setEmoji("🎫")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("rp_obf_help")
-      .setLabel("Obf Channels")
-      .setEmoji("🧠")
-      .setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("rp_refresh").setLabel("Refresh").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rp_ticket_help").setLabel("Ticket Category").setEmoji("🎫").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("rp_obf_help").setLabel("Obf Channels").setEmoji("🧠").setStyle(ButtonStyle.Primary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("rp_guilds")
-      .setLabel("Manage Guilds")
-      .setEmoji("🌐")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("rp_reload")
-      .setLabel("Reload Clyde")
-      .setEmoji("🧠")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("rp_shutdown")
-      .setLabel("Shutdown Bot")
-      .setEmoji("🛑")
-      .setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId("rp_guilds").setLabel("Manage Guilds").setEmoji("🌐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rp_reload").setLabel("Reload Clyde").setEmoji("🧠").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rp_shutdown").setLabel("Shutdown Bot").setEmoji("🛑").setStyle(ButtonStyle.Danger)
   );
 
   await message.reply({ embeds: [embed], components: [row1, row2] });
@@ -596,18 +778,12 @@ async function handleWhitelist(message, args) {
 
   let targetId = null;
   const mentionMatch = targetArg.match(/^<@!?(\d{17,20})>$/);
-  if (mentionMatch) {
-    targetId = mentionMatch[1];
-  } else if (/^\d{17,20}$/.test(targetArg)) {
-    targetId = targetArg;
-  }
+  if (mentionMatch) targetId = mentionMatch[1];
+  else if (/^\d{17,20}$/.test(targetArg)) targetId = targetArg;
 
-  if (!targetId) {
-    return message.reply(`${EMOJI.no} Mention a user or provide their ID.`);
-  }
+  if (!targetId) return message.reply(`${EMOJI.no} Mention a user or provide their ID.`);
 
   const panelKey = resolvePanel(roleArg);
-
   if (!panelKey || !PANELS[panelKey]) {
     return message.reply(
       `${EMOJI.no} Unknown role: \`${roleArg}\`\n` +
@@ -618,32 +794,20 @@ async function handleWhitelist(message, args) {
   const panel = PANELS[panelKey];
 
   let target;
-  try {
-    target = await message.guild.members.fetch(targetId);
-  } catch {
-    return message.reply(`${EMOJI.no} User not found on this server.`);
-  }
+  try { target = await message.guild.members.fetch(targetId); }
+  catch { return message.reply(`${EMOJI.no} User not found on this server.`); }
 
-  if (!target) {
-    return message.reply(`${EMOJI.no} User not found.`);
-  }
+  if (!target) return message.reply(`${EMOJI.no} User not found.`);
 
   let role;
-  try {
-    role = await message.guild.roles.fetch(panel.roleId);
-  } catch {
-    return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` does not exist on this server.`);
-  }
+  try { role = await message.guild.roles.fetch(panel.roleId); }
+  catch { return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` does not exist on this server.`); }
 
-  if (!role) {
-    return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` could not be found.`);
-  }
+  if (!role) return message.reply(`${EMOJI.no} The role \`${panel.roleId}\` could not be found.`);
 
   const botMember = message.guild.members.me;
   if (role.position >= botMember.roles.highest.position) {
-    return message.reply(
-      `${EMOJI.no} I can't assign this role (it's above my highest role in the hierarchy).`
-    );
+    return message.reply(`${EMOJI.no} I can't assign this role (it's above my highest role in the hierarchy).`);
   }
 
   const roleName = `@${role.name}`;
@@ -653,9 +817,7 @@ async function handleWhitelist(message, args) {
       const embed = new EmbedBuilder()
         .setTitle(`${EMOJI.yes} Already Whitelisted`)
         .setColor(0xf59e0b)
-        .setDescription(
-          `<@${target.id}> already has the **${roleName}** role (**${panel.displayName}**).`
-        );
+        .setDescription(`<@${target.id}> already has the **${roleName}** role (**${panel.displayName}**).`);
       return message.reply({ embeds: [embed] });
     }
 
@@ -664,9 +826,7 @@ async function handleWhitelist(message, args) {
     const embed = new EmbedBuilder()
       .setTitle(`${EMOJI.yes} Whitelist Successful`)
       .setColor(0x22c55e)
-      .setDescription(
-        `<@${target.id}> has received the **${roleName}** role (**${panel.displayName}**).`
-      )
+      .setDescription(`<@${target.id}> has received the **${roleName}** role (**${panel.displayName}**).`)
       .addFields(
         { name: "👤 Member", value: `<@${target.id}> (\`${target.id}\`)`, inline: true },
         { name: "🎭 Role", value: `**${roleName}**`, inline: true },
@@ -692,7 +852,6 @@ async function handleWhitelist(message, args) {
 // ============================================================
 async function handleFetch(message, input) {
   input = (input || "").trim();
-
   if (!input) {
     const urlInMessage = message.content.match(/https?:\/\/[^\s"'`)\]]+/i);
     if (urlInMessage) input = urlInMessage[0];
@@ -709,7 +868,6 @@ async function handleFetch(message, input) {
   }
 
   let url = null;
-
   const httpGetMatch = input.match(/HttpGet\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/i);
   if (httpGetMatch) url = httpGetMatch[1];
 
@@ -723,34 +881,21 @@ async function handleFetch(message, input) {
     if (/^https?:\/\/.+/i.test(clean)) url = clean;
   }
 
-  if (!url) {
-    return message.reply(`${EMOJI.no} No valid URL found in your message.`);
-  }
-
+  if (!url) return message.reply(`${EMOJI.no} No valid URL found in your message.`);
   url = url.replace(/[)\].,;:!?]+$/g, "").trim();
 
-  if (!/^https?:\/\//i.test(url)) {
-    return message.reply(`${EMOJI.no} The URL must start with \`http://\` or \`https://\`.`);
-  }
+  if (!/^https?:\/\//i.test(url)) return message.reply(`${EMOJI.no} The URL must start with \`http://\` or \`https://\`.`);
 
   const processing = await message.reply(`${EMOJI.loading} Fetching...`);
 
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "SiteObfusque-Bot/1.0" },
-    });
-
+    const res = await fetch(url, { headers: { "User-Agent": "SiteObfusque-Bot/1.0" } });
     if (!res.ok) {
-      return processing.edit(
-        `${EMOJI.no} HTTP Error **${res.status}** — \`${res.statusText}\`\nURL: \`${url}\``
-      );
+      return processing.edit(`${EMOJI.no} HTTP Error **${res.status}** — \`${res.statusText}\`\nURL: \`${url}\``);
     }
 
     const content = await res.text();
-
-    if (!content || content.length === 0) {
-      return processing.edit(`${EMOJI.no} The file is empty.`);
-    }
+    if (!content || content.length === 0) return processing.edit(`${EMOJI.no} The file is empty.`);
 
     const lower = url.toLowerCase();
     let lang = "";
@@ -761,13 +906,11 @@ async function handleFetch(message, input) {
     else if (lower.endsWith(".ts")) lang = "typescript";
     else if (lower.endsWith(".html")) lang = "html";
     else if (lower.endsWith(".css")) lang = "css";
-    else if (lower.endsWith(".txt")) lang = "";
 
     const MAX_EMBED = 3900;
 
     if (content.length > MAX_EMBED) {
       const buffer = Buffer.from(content, "utf-8");
-
       let ext = "txt";
       if (lang === "lua") ext = "lua";
       else if (lang === "javascript") ext = "js";
@@ -779,23 +922,14 @@ async function handleFetch(message, input) {
       const embed = new EmbedBuilder()
         .setTitle(`${EMOJI.yes} Content Retrieved`)
         .setColor(0x22c55e)
-        .setDescription(
-          `📄 **${content.length} characters** — too long to display here.\n` +
-          `🔗 [Source link](${url})`
-        )
-        .addFields({
-          name: "🔗 Extracted URL",
-          value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
-          inline: false,
-        })
+        .setDescription(`📄 **${content.length} characters** — too long to display here.\n🔗 [Source link](${url})`)
+        .addFields({ name: "🔗 Extracted URL", value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``, inline: false })
         .setFooter({ text: "SiteObfusque — fetch" });
 
       const preview = content.slice(0, 500).replace(/```/g, "``\u200b`");
       embed.addFields({
         name: "👁️ Preview",
-        value:
-          "```" + (lang || "") + "\n" + preview +
-          (content.length > 500 ? "\n..." : "") + "\n```",
+        value: "```" + (lang || "") + "\n" + preview + (content.length > 500 ? "\n..." : "") + "\n```",
         inline: false,
       });
 
@@ -809,11 +943,7 @@ async function handleFetch(message, input) {
       .setColor(0x22c55e)
       .setDescription("```" + (lang || "") + "\n" + safeContent + "\n```")
       .addFields(
-        {
-          name: "🔗 Extracted URL",
-          value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
-          inline: false,
-        },
+        { name: "🔗 Extracted URL", value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``, inline: false },
         { name: "📏 Size", value: `${content.length} characters`, inline: true },
         { name: "🌐 Status", value: `HTTP ${res.status}`, inline: true }
       )
@@ -835,31 +965,19 @@ async function handleObf(message) {
   const obfChannels = guildCfg.obfChannels && guildCfg.obfChannels.length ? guildCfg.obfChannels : cfg.obfChannels;
 
   if (!obfChannels.includes(message.channel.id)) {
-    const allowed = obfChannels.length
-      ? obfChannels.map((id) => `<#${id}>`).join(", ")
-      : "*none configured yet*";
-    return message.reply(
-      `${EMOJI.no} \`.obf\` is not allowed in this channel.\nAuthorized: ${allowed}`
-    );
+    const allowed = obfChannels.length ? obfChannels.map((id) => `<#${id}>`).join(", ") : "*none configured yet*";
+    return message.reply(`${EMOJI.no} \`.obf\` is not allowed in this channel.\nAuthorized: ${allowed}`);
   }
 
   const attachment = message.attachments.first();
-  if (!attachment) {
-    return message.reply(`${EMOJI.no} Attach a \`.lua\` / \`.luau\` file.`);
-  }
+  if (!attachment) return message.reply(`${EMOJI.no} Attach a \`.lua\` / \`.luau\` file.`);
 
   const filename = attachment.name.toLowerCase();
-  if (
-    !filename.endsWith(".lua") &&
-    !filename.endsWith(".luau") &&
-    !filename.endsWith(".txt")
-  ) {
+  if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
     return message.reply(`${EMOJI.no} Supported: \`.lua\`, \`.luau\`, \`.txt\``);
   }
 
-  if (!clyde) {
-    return message.reply(`${EMOJI.no} Obfuscator not loaded.`);
-  }
+  if (!clyde) return message.reply(`${EMOJI.no} Obfuscator not loaded.`);
 
   const processing = await message.reply(`${EMOJI.loading} Obfuscating...`);
 
@@ -867,17 +985,10 @@ async function handleObf(message) {
     const res = await fetch(attachment.url);
     const source = await res.text();
 
-    if (source.length > 500000) {
-      return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
-    }
+    if (source.length > 500000) return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
 
     const t0 = Date.now();
-    const output = await obfuscateSource(source, {
-      vm: true,
-      strings: true,
-      flow: true,
-      vmLevel: "maximum",
-    });
+    const output = await obfuscateSource(source, { vm: true, strings: true, flow: true, vmLevel: "maximum" });
     const duration = Date.now() - t0;
 
     const buffer = Buffer.from(output, "utf-8");
@@ -905,14 +1016,10 @@ async function handleObf(message) {
 // DEOBF
 // ============================================================
 async function handleDeobf(message) {
-  if (!fs.existsSync(CLYDE_DEOBF_CLI)) {
-    return message.reply(`${EMOJI.no} ClydeDeobf is not installed.`);
-  }
+  if (!fs.existsSync(CLYDE_DEOBF_CLI)) return message.reply(`${EMOJI.no} ClydeDeobf is not installed.`);
 
   const attachment = message.attachments.first();
-  if (!attachment) {
-    return message.reply(`${EMOJI.no} Attach a \`.lua\` file to deobfuscate.`);
-  }
+  if (!attachment) return message.reply(`${EMOJI.no} Attach a \`.lua\` file to deobfuscate.`);
 
   const filename = attachment.name.toLowerCase();
   if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
@@ -925,9 +1032,7 @@ async function handleDeobf(message) {
     const res = await fetch(attachment.url);
     const source = await res.text();
 
-    if (source.length > 500000) {
-      return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
-    }
+    if (source.length > 500000) return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
 
     const t0 = Date.now();
     const output = await runClydeDeobf(source);
@@ -957,9 +1062,7 @@ async function handleDeobf(message) {
 // LOADER
 // ============================================================
 async function handleLoader(message, args) {
-  if (!GITHUB_TOKEN) {
-    return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
-  }
+  if (!GITHUB_TOKEN) return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
 
   const raw = args.join(" ").trim();
   let key = null;
@@ -977,22 +1080,14 @@ async function handleLoader(message, args) {
   }
 
   const attachment = message.attachments.first();
-  if (!attachment) {
-    return message.reply(`${EMOJI.no} Attach a \`.lua\` file.`);
-  }
+  if (!attachment) return message.reply(`${EMOJI.no} Attach a \`.lua\` file.`);
 
   const filename = attachment.name.toLowerCase();
-  if (
-    !filename.endsWith(".lua") &&
-    !filename.endsWith(".luau") &&
-    !filename.endsWith(".txt")
-  ) {
+  if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
     return message.reply(`${EMOJI.no} Supported: \`.lua\`, \`.luau\`, \`.txt\``);
   }
 
-  if (!clyde) {
-    return message.reply(`${EMOJI.no} Obfuscator not loaded.`);
-  }
+  if (!clyde) return message.reply(`${EMOJI.no} Obfuscator not loaded.`);
 
   const processing = await message.reply(`${EMOJI.loading} Creating loader...`);
 
@@ -1000,44 +1095,23 @@ async function handleLoader(message, args) {
     const res = await fetch(attachment.url);
     const source = await res.text();
 
-    if (source.length > 500000) {
-      return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
-    }
+    if (source.length > 500000) return processing.edit(`${EMOJI.no} File too long (max 500 KB).`);
 
-    const obfuscated = await obfuscateSource(source, {
-      vm: true,
-      strings: true,
-      flow: true,
-      vmLevel: "maximum",
-    });
+    const obfuscated = await obfuscateSource(source, { vm: true, strings: true, flow: true, vmLevel: "maximum" });
 
     const payloadFilename = crypto.randomBytes(6).toString("hex") + ".lua";
-    const payloadGist = await createGist(
-      "SiteObfusque payload",
-      payloadFilename,
-      obfuscated,
-      true
-    );
+    const payloadGist = await createGist("SiteObfusque payload", payloadFilename, obfuscated, true);
 
     const djb2 = (str) => {
       let h = 5381;
-      for (let i = 0; i < str.length; i++) {
-        h = ((h * 33) + str.charCodeAt(i)) >>> 0;
-      }
+      for (let i = 0; i < str.length; i++) h = ((h * 33) + str.charCodeAt(i)) >>> 0;
       return h;
     };
     const keyHash = djb2(key);
 
     const encodedUrl = Buffer.from(payloadGist.rawUrl, "utf-8").toString("base64");
-
     const loader = buildLoaderTemplate({ keyHash, encodedUrl });
-
-    const loaderGist = await createGist(
-      "SiteObfusque loader",
-      "loader.lua",
-      loader,
-      true
-    );
+    const loaderGist = await createGist("SiteObfusque loader", "loader.lua", loader, true);
 
     const loaderBuffer = Buffer.from(loader, "utf-8");
     const loaderFile = new AttachmentBuilder(loaderBuffer, { name: "loader.lua" });
@@ -1071,24 +1145,12 @@ async function handleLoader(message, args) {
         inline: false,
       });
     } else {
-      embed.addFields({
-        name: "🔑 Key",
-        value: "```\n" + key + "\n```",
-        inline: false,
-      });
+      embed.addFields({ name: "🔑 Key", value: "```\n" + key + "\n```", inline: false });
     }
 
-    embed.addFields({
-      name: "🔐 Hash (djb2)",
-      value: `\`${keyHash}\``,
-      inline: true,
-    });
+    embed.addFields({ name: "🔐 Hash (djb2)", value: `\`${keyHash}\``, inline: true });
 
-    await processing.edit({
-      content: "",
-      embeds: [embed],
-      files: [loaderFile],
-    });
+    await processing.edit({ content: "", embeds: [embed], files: [loaderFile] });
   } catch (e) {
     console.error("[.loader error]", e);
     await processing.edit(`${EMOJI.no} Error: ${e.message}`);
@@ -1096,7 +1158,7 @@ async function handleLoader(message, args) {
 }
 
 // ============================================================
-// LOADER TEMPLATE
+// LOADER TEMPLATE (unchanged)
 // ============================================================
 function buildLoaderTemplate({ keyHash, encodedUrl }) {
   return `--[[
@@ -1966,14 +2028,10 @@ Initialize()
 // UPLOAD
 // ============================================================
 async function handleUpload(message) {
-  if (!GITHUB_TOKEN) {
-    return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
-  }
+  if (!GITHUB_TOKEN) return message.reply(`${EMOJI.no} \`GITHUB_TOKEN\` not configured.`);
 
   const attachment = message.attachments.first();
-  if (!attachment) {
-    return message.reply(`${EMOJI.no} Attach a \`.lua\` file.`);
-  }
+  if (!attachment) return message.reply(`${EMOJI.no} Attach a \`.lua\` file.`);
 
   const filename = attachment.name.toLowerCase();
   if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
@@ -2001,9 +2059,7 @@ async function handleUpload(message) {
     });
 
     const gist = await gistRes.json();
-    if (!gistRes.ok) {
-      return processing.edit(`${EMOJI.no} GitHub error: ${gist.message || "unknown"}`);
-    }
+    if (!gistRes.ok) return processing.edit(`${EMOJI.no} GitHub error: ${gist.message || "unknown"}`);
 
     const fileKey = Object.keys(gist.files)[0];
     const rawUrl = gist.files[fileKey].raw_url;
@@ -2037,9 +2093,7 @@ async function handlePurge(message, args) {
 
   try {
     const deleted = await message.channel.bulkDelete(amount, true);
-    const reply = await message.channel.send(
-      `${EMOJI.yes} Deleted **${deleted.size}** message(s).`
-    );
+    const reply = await message.channel.send(`${EMOJI.yes} Deleted **${deleted.size}** message(s).`);
     setTimeout(() => reply.delete().catch(() => {}), 4000);
   } catch (e) {
     console.error("[.purge error]", e);
@@ -2060,11 +2114,8 @@ async function handleSetCategory(message, args) {
   }
 
   let category;
-  try {
-    category = await message.guild.channels.fetch(id);
-  } catch {
-    return message.reply(`${EMOJI.no} No channel found with ID \`${id}\`.`);
-  }
+  try { category = await message.guild.channels.fetch(id); }
+  catch { return message.reply(`${EMOJI.no} No channel found with ID \`${id}\`.`); }
 
   if (!category || category.type !== ChannelType.GuildCategory) {
     return message.reply(`${EMOJI.no} \`${id}\` is not a category.`);
@@ -2089,14 +2140,10 @@ async function handleSetCategory(message, args) {
 // SETOBFCHANNELS
 // ============================================================
 async function handleSetObfChannels(message, args) {
-  if (args.length < 1) {
-    return message.reply(`${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``);
-  }
+  if (args.length < 1) return message.reply(`${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``);
 
   const ids = args.filter((a) => /^\d{17,20}$/.test(a));
-  if (ids.length === 0) {
-    return message.reply(`${EMOJI.no} No valid channel IDs provided.`);
-  }
+  if (ids.length === 0) return message.reply(`${EMOJI.no} No valid channel IDs provided.`);
 
   const valid = [];
   for (const id of ids) {
@@ -2106,9 +2153,7 @@ async function handleSetObfChannels(message, args) {
     } catch {}
   }
 
-  if (valid.length === 0) {
-    return message.reply(`${EMOJI.no} None of the provided IDs are valid text channels.`);
-  }
+  if (valid.length === 0) return message.reply(`${EMOJI.no} None of the provided IDs are valid text channels.`);
 
   const cfg = loadConfig();
   const guildCfg = getGuildConfig(message.guild.id);
@@ -2133,9 +2178,7 @@ async function handleTicketPanel(message) {
   const guildCfg = getGuildConfig(message.guild.id);
   const categoryId = guildCfg.categoryId || cfg.categoryId;
 
-  if (!categoryId) {
-    return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``);
-  }
+  if (!categoryId) return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``);
 
   const embed = new EmbedBuilder()
     .setTitle("🎫 Support Tickets")
@@ -2147,11 +2190,7 @@ async function handleTicketPanel(message) {
     .setFooter({ text: "SiteObfusque Support" });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("create_ticket")
-      .setLabel("Create Ticket")
-      .setEmoji("🎫")
-      .setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("create_ticket").setLabel("Create Ticket").setEmoji("🎫").setStyle(ButtonStyle.Primary)
   );
 
   await message.channel.send({ embeds: [embed], components: [row] });
@@ -2161,12 +2200,31 @@ async function handleTicketPanel(message) {
 // INTERACTIONS
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
+  // ==========================================================
+  // SLASH COMMANDS
+  // ==========================================================
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "update") {
+      return handleSlashUpdate(interaction);
+    }
+    return;
+  }
+
   if (!interaction.isButton()) return;
 
   // ==========================================================
-  // REALPANEL BUTTONS — all respond (fix for "did not respond in time")
+  // UPDATE ACK
   // ==========================================================
+  if (interaction.customId === "update_ack") {
+    return interaction.reply({
+      content: `${EMOJI.yes} Thanks for confirming!`,
+      ephemeral: true,
+    });
+  }
 
+  // ==========================================================
+  // REALPANEL BUTTONS
+  // ==========================================================
   if (interaction.customId === "rp_refresh") {
     try {
       await interaction.deferUpdate();
@@ -2259,12 +2317,7 @@ client.on("interactionCreate", async (interaction) => {
     try {
       const guilds = [...client.guilds.cache.values()].slice(0, 25);
       const list = guilds
-        .map(
-          (g, i) =>
-            `**${i + 1}.** **${g.name}**\n` +
-            `> 🆔 \`${g.id}\`\n` +
-            `> 👥 \`${g.memberCount}\` members`
-        )
+        .map((g, i) => `**${i + 1}.** **${g.name}**\n> 🆔 \`${g.id}\`\n> 👥 \`${g.memberCount}\` members`)
         .join("\n\n") || "*No guilds*";
 
       const embed = new EmbedBuilder()
@@ -2283,17 +2336,11 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.customId === "rp_reload") {
-    await interaction.reply({
-      content: `${EMOJI.loading} Reloading Clyde...`,
-      ephemeral: true,
-    });
-
+    await interaction.reply({ content: `${EMOJI.loading} Reloading Clyde...`, ephemeral: true });
     try {
       const ok = await loadClyde();
       await interaction.editReply({
-        content: ok
-          ? `${EMOJI.yes} Clyde reloaded successfully.`
-          : `${EMOJI.no} Failed to reload Clyde. Check the console.`,
+        content: ok ? `${EMOJI.yes} Clyde reloaded successfully.` : `${EMOJI.no} Failed to reload Clyde. Check the console.`,
       });
     } catch (e) {
       console.error("[rp_reload]", e);
@@ -2303,15 +2350,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.customId === "rp_shutdown") {
-    await interaction.reply({
-      content: `${EMOJI.no} **Shutting down the bot in 3 seconds...**`,
-      ephemeral: true,
-    });
-
-    setTimeout(() => {
-      console.log("[rp_shutdown] Bot shutting down...");
-      process.exit(0);
-    }, 3000);
+    await interaction.reply({ content: `${EMOJI.no} **Shutting down the bot in 3 seconds...**`, ephemeral: true });
+    setTimeout(() => { console.log("[rp_shutdown] Bot shutting down..."); process.exit(0); }, 3000);
     return;
   }
 
@@ -2322,17 +2362,14 @@ client.on("interactionCreate", async (interaction) => {
     const panelKey = interaction.customId.replace("panel_get_", "").replace(/_/g, " ");
     const panel = PANELS[panelKey];
 
-    if (!panel) {
-      return interaction.reply({ content: `${EMOJI.no} Panel not found.`, ephemeral: true });
-    }
+    if (!panel) return interaction.reply({ content: `${EMOJI.no} Panel not found.`, ephemeral: true });
 
     const member = interaction.member;
     const roleName = await getRoleName(interaction.guild, panel.roleId);
 
     if (!member.roles.cache.has(panel.roleId)) {
       return interaction.reply({
-        content:
-          `${EMOJI.no} **You need to be whitelisted or have the ${roleName} role to unlock this script.**`,
+        content: `${EMOJI.no} **You need to be whitelisted or have the ${roleName} role to unlock this script.**`,
         ephemeral: true,
       });
     }
@@ -2341,24 +2378,16 @@ client.on("interactionCreate", async (interaction) => {
       const dmEmbed = new EmbedBuilder()
         .setTitle(`${panel.emoji} ${panel.displayName} — Script`)
         .setColor(panel.color)
-        .setDescription(
-          "Here is your script. Copy and paste it into your executor.\n\n" +
-          "```lua\n" + panel.script + "\n```"
-        )
+        .setDescription("Here is your script. Copy and paste it into your executor.\n\n" + "```lua\n" + panel.script + "\n```")
         .setFooter({ text: "SiteObfusque — DM Delivery" })
         .setTimestamp();
 
       await interaction.user.send({ embeds: [dmEmbed] });
-
-      await interaction.reply({
-        content: `${EMOJI.yes} Script sent to your DM! Check your private messages.`,
-        ephemeral: true,
-      });
+      await interaction.reply({ content: `${EMOJI.yes} Script sent to your DM! Check your private messages.`, ephemeral: true });
     } catch (e) {
       console.error("[panel DM error]", e);
       await interaction.reply({
-        content:
-          `${EMOJI.no} I couldn't send you a DM. Please enable DMs from server members and try again.`,
+        content: `${EMOJI.no} I couldn't send you a DM. Please enable DMs from server members and try again.`,
         ephemeral: true,
       });
     }
@@ -2376,23 +2405,13 @@ client.on("interactionCreate", async (interaction) => {
       const guildCfg = getGuildConfig(interaction.guild.id);
       const categoryId = guildCfg.categoryId || cfg.categoryId;
 
-      if (!categoryId) {
-        return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
-      }
+      if (!categoryId) return interaction.editReply(`${EMOJI.no} No ticket category configured.`);
 
       const guild = interaction.guild;
       const user = interaction.user;
 
-      const existing = guild.channels.cache.find(
-        (c) =>
-          c.name === `ticket-${user.username.toLowerCase()}` &&
-          c.parentId === categoryId
-      );
-      if (existing) {
-        return interaction.editReply(
-          `${EMOJI.no} You already have an open ticket: <#${existing.id}>`
-        );
-      }
+      const existing = guild.channels.cache.find((c) => c.name === `ticket-${user.username.toLowerCase()}` && c.parentId === categoryId);
+      if (existing) return interaction.editReply(`${EMOJI.no} You already have an open ticket: <#${existing.id}>`);
 
       guildCfg.ticketCounter = (guildCfg.ticketCounter || 0) + 1;
       saveGuildConfig(guild.id, guildCfg);
@@ -2426,26 +2445,14 @@ client.on("interactionCreate", async (interaction) => {
       const ticketEmbed = new EmbedBuilder()
         .setTitle(`🎫 Ticket — ${user.username}`)
         .setColor(0x7c3aed)
-        .setDescription(
-          `Hello <@${user.id}>, a member of our team will be with you shortly.\n\n` +
-          "Please describe your issue in detail."
-        )
+        .setDescription(`Hello <@${user.id}>, a member of our team will be with you shortly.\n\nPlease describe your issue in detail.`)
         .setFooter({ text: "SiteObfusque Support" });
 
       const closeRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("close_ticket")
-          .setLabel("Close Ticket")
-          .setEmoji("🔒")
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId("close_ticket").setLabel("Close Ticket").setEmoji("🔒").setStyle(ButtonStyle.Danger)
       );
 
-      await channel.send({
-        content: `<@${user.id}>`,
-        embeds: [ticketEmbed],
-        components: [closeRow],
-      });
-
+      await channel.send({ content: `<@${user.id}>`, embeds: [ticketEmbed], components: [closeRow] });
       await interaction.editReply(`${EMOJI.yes} Ticket created: <#${channel.id}>`);
     } catch (e) {
       console.error("[ticket error]", e);
@@ -2462,9 +2469,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.customId === "close_ticket") {
     try {
       await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
-      setTimeout(() => {
-        interaction.channel.delete().catch(() => {});
-      }, 5000);
+      setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
     } catch (e) {
       console.error("[close ticket error]", e);
     }
