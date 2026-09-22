@@ -39,7 +39,125 @@ const EMOJI = {
 };
 
 // ============================================================
-// CONFIG (tickets + obf channels)
+// PANEL SYSTEM — rôles whitelist + scripts
+// ============================================================
+const PANELS = {
+  "code sniper": {
+    displayName: "🎯 Code Sniper",
+    roleId: "1551905830897451119",
+    script: 'loadstring(game:HttpGet("https://api.obscuravm.com/scripts/8343230685547954685"))()',
+    color: 0x7c3aed,
+    description: "The ultimate **Code Sniper** toolkit. Whitelisted members only.",
+    emoji: "🎯",
+    keywords: ["code", "sniper", "code sniper", "codesniper", "cs", "snip", "snipe", "c sniper"],
+  },
+  "ap gift": {
+    displayName: "🎁 AP Gift",
+    roleId: "1551906017187729409",
+    script: 'loadstring(game:HttpGet("https://api.obscuravm.com/scripts/4736094501447000867"))()',
+    color: 0x22c55e,
+    description: "Exclusive **AP Gift** script. Whitelisted members only.",
+    emoji: "🎁",
+    keywords: ["ap", "gift", "ap gift", "apgift", "gifts", "a p gift"],
+  },
+  "nova visual": {
+    displayName: "👁️ Nova Visual",
+    roleId: "1551906110590558309",
+    script: 'loadstring(game:HttpGet("https://api.obscuravm.com/scripts/9138196775171921051"))()',
+    color: 0xf59e0b,
+    description: "Next-level **Nova Visual** experience. Whitelisted members only.",
+    emoji: "👁️",
+    keywords: ["nova", "visual", "nova visual", "novavisual", "nv", "vis", "nov", "visuals"],
+  },
+};
+
+// ============================================================
+// FUZZY MATCHING — trouve le panel le plus proche de l'input
+// Retourne null si aucun match raisonnable
+// ============================================================
+function levenshtein(a, b) {
+  a = a.toLowerCase();
+  b = b.toLowerCase();
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Score : 0 = match parfait, plus grand = moins bon
+function similarityScore(input, keyword) {
+  input = input.toLowerCase().trim();
+  keyword = keyword.toLowerCase().trim();
+
+  // Match exact
+  if (input === keyword) return 0;
+
+  // Input contient le keyword (ex: "panel sniper" contient "sniper")
+  if (input.includes(keyword)) return 1;
+
+  // Keyword contient l'input (ex: "sniper" contient "snip")
+  if (keyword.includes(input)) return 2;
+
+  // Distance de Levenshtein
+  const dist = levenshtein(input, keyword);
+  const maxLen = Math.max(input.length, keyword.length);
+
+  // Tolérance : jusqu'à 40% de différence
+  const ratio = dist / maxLen;
+  if (ratio <= 0.4) return 10 + dist;
+
+  return Infinity;
+}
+
+// Trouve le panel correspondant à l'input (avec fuzzy matching)
+function resolvePanel(input) {
+  if (!input) return null;
+  const cleaned = input.toLowerCase().trim().replace(/\s+/g, " ");
+
+  // 1) Match exact d'abord
+  if (PANELS[cleaned]) return cleaned;
+
+  let best = null;
+  let bestScore = Infinity;
+
+  for (const [panelKey, panel] of Object.entries(PANELS)) {
+    // Teste le nom complet du panel
+    const candidates = [panelKey, panel.displayName.toLowerCase(), ...panel.keywords];
+
+    for (const candidate of candidates) {
+      const score = similarityScore(cleaned, candidate);
+      if (score < bestScore) {
+        bestScore = score;
+        best = panelKey;
+      }
+    }
+  }
+
+  // Si le meilleur score est acceptable
+  if (best && bestScore < Infinity) return best;
+  return null;
+}
+
+// ============================================================
+// CONFIG
 // ============================================================
 const CONFIG_PATH = path.join(__dirname, "bot-config.json");
 
@@ -64,7 +182,7 @@ function saveConfig(cfg) {
 }
 
 // ============================================================
-// CHARGEMENT DIRECT DE CLYDE
+// CHARGEMENT DE CLYDE
 // ============================================================
 let clyde = null;
 
@@ -108,9 +226,6 @@ async function obfuscateSource(source, options = {}) {
   return output;
 }
 
-// ============================================================
-// DÉOBFUSCATION VIA CLYDEDEOBF (Node.js)
-// ============================================================
 function runClydeDeobf(inputCode) {
   return new Promise((resolve, reject) => {
     const tempInput = path.join(__dirname, "temp_deobf_input.lua");
@@ -139,9 +254,6 @@ function runClydeDeobf(inputCode) {
   });
 }
 
-// ============================================================
-// HELPERS GITHUB GIST
-// ============================================================
 async function createGist(description, filename, content, isPublic = true) {
   const res = await fetch("https://api.github.com/gists", {
     method: "POST",
@@ -171,7 +283,7 @@ async function createGist(description, filename, content, isPublic = true) {
 }
 
 // ============================================================
-// DISCORD CLIENT
+// READY
 // ============================================================
 client.once("ready", () => {
   console.log("");
@@ -181,10 +293,14 @@ client.once("ready", () => {
   console.log(`  🧠 Clyde: ${clyde ? "✅" : "❌"}`);
   console.log(`  🔓 ClydeDeobf: ${fs.existsSync(CLYDE_DEOBF_CLI) ? "✅" : "❌"}`);
   console.log(`  🐙 GitHub: ${GITHUB_TOKEN ? "✅" : "❌"}`);
+  console.log(`  🎯 Panels: ${Object.keys(PANELS).length}`);
   console.log("");
   client.user.setActivity("⚡ .help", { type: 3 });
 });
 
+// ============================================================
+// ROUTEUR
+// ============================================================
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.guild) return;
@@ -198,10 +314,14 @@ client.on("messageCreate", async (message) => {
   if (command === "loader") return handleLoader(message, args);
   if (command === "upload") return handleUpload(message);
   if (command === "fetch" || command === "raw" || command === "get") {
-    // On passe TOUT le contenu après la commande, pas juste args[0]
     const fullArg = message.content.slice(PREFIX.length + command.length).trim();
     return handleFetch(message, fullArg);
   }
+  if (command === "panel") {
+    const fullArg = message.content.slice(PREFIX.length + command.length).trim();
+    return handlePanel(message, fullArg);
+  }
+  if (command === "w" || command === "whitelist") return handleWhitelist(message, args);
   if (command === "help" || command === "aide") return handleHelp(message);
   if (command === "tuto") return handleTuto(message);
   if (command === "purge") return handlePurge(message, args);
@@ -223,7 +343,9 @@ async function handleHelp(message) {
       { name: "`.deobf`", value: "Deobfuscate a Clyde-obfuscated script. **Restricted.**" },
       { name: "`.loader [\"<key>\"]`", value: "Create a protected loader. If no key given, one is auto-generated." },
       { name: "`.upload`", value: "Upload a file to GitHub Gist + loadstring" },
-      { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring and display its content" },
+      { name: "`.fetch <url|loadstring>`", value: "Fetch a raw URL or extract URL from a loadstring" },
+      { name: "`.panel <code sniper|ap gift|nova visual>`", value: "Show the whitelist panel (fuzzy matching supported)" },
+      { name: "`.w @user|id <sniper|AP|visual>`", value: "Give a whitelist role to a member (Manage Roles required)" },
       { name: "`.tuto`", value: "Show the tutorial panel" },
       { name: "`.purge <1-100>`", value: "Delete N messages (Manage Messages required)" },
       { name: "`.setcategoryticket <id>`", value: "Set the category ID for tickets (Manage Server required)" },
@@ -244,48 +366,15 @@ async function handleTuto(message) {
     .setColor(0x7c3aed)
     .setDescription("Welcome! Here's everything you need to know to use the bot.")
     .addFields(
-      {
-        name: "1️⃣  Get your script ready",
-        value: "Save your Lua/Luau script as a `.lua`, `.luau`, or `.txt` file on your computer.",
-      },
-      {
-        name: "2️⃣  Obfuscate it",
-        value:
-          "Go to an authorized channel and send:\n```\n.obf\n```\n" +
-          "**with your file attached in the same message.**",
-      },
-      {
-        name: "3️⃣  Deobfuscate a script (restricted)",
-        value:
-          "Send:\n```\n.deobf\n```\n" +
-          "with the file attached. Only Clyde-obfuscated scripts are supported.",
-      },
-      {
-        name: "4️⃣  Create a protected loader",
-        value:
-          "Send:\n```\n.loader \"your-key\"\n```\n" +
-          "or just `\`.loader\`` (auto-generated key). Attach your file.",
-      },
-      {
-        name: "5️⃣  Upload it (optional)",
-        value:
-          "Send:\n```\n.upload\n```\n" +
-          "with the file attached to get a loadstring.",
-      },
-      {
-        name: "6️⃣  Fetch a raw script",
-        value:
-          "Send:\n```\n.fetch https://raw.githubusercontent.com/...\n```\n" +
-          "or paste a loadstring:\n```\n.fetch loadstring(game:HttpGet(\"https://...\"))()\n```",
-      },
-      {
-        name: "7️⃣  Need help?",
-        value: "Open a ticket with the button in the ticket panel channel.",
-      },
-      {
-        name: "⚠️  Rules",
-        value: "• `.obf` only works in authorized channels.\n• Max file size: **500 KB**.",
-      }
+      { name: "1️⃣  Get your script ready", value: "Save your Lua/Luau script as a `.lua`, `.luau`, or `.txt` file." },
+      { name: "2️⃣  Obfuscate it", value: "Go to an authorized channel and send:\n```\n.obf\n```\n**with your file attached.**" },
+      { name: "3️⃣  Deobfuscate a script (restricted)", value: "Send:\n```\n.deobf\n```\nwith the file attached." },
+      { name: "4️⃣  Create a protected loader", value: "Send:\n```\n.loader \"your-key\"\n```\nor just `\`.loader\`` (auto-generated key). Attach your file." },
+      { name: "5️⃣  Upload it (optional)", value: "Send:\n```\n.upload\n```\nwith the file attached to get a loadstring." },
+      { name: "6️⃣  Fetch a raw script", value: "Send:\n```\n.fetch https://raw.githubusercontent.com/...\n```\nor paste a loadstring." },
+      { name: "7️⃣  Open a panel", value: "Send:\n```\n.panel code sniper\n.panel ap gift\n.panel nova visual\n```\n**Fuzzy matching supported** (ex: `.panel sniper`, `.panel cs`, `.panel vis`)." },
+      { name: "8️⃣  Need help?", value: "Open a ticket with the button in the ticket panel channel." },
+      { name: "⚠️  Rules", value: "• `.obf` only works in authorized channels.\n• Max file size: **500 KB**." }
     )
     .setFooter({ text: "SiteObfusque" })
     .setTimestamp();
@@ -294,18 +383,183 @@ async function handleTuto(message) {
 }
 
 // ============================================================
-// FETCH — Extrait l'URL d'une loadstring ou d'une URL brute
-// Accepte :
-//   .fetch https://raw.githubusercontent.com/user/repo/main/script.lua
-//   .fetch loadstring(game:HttpGet("https://raw.githubusercontent.com/..."))()
-//   .fetch <n'importe quel texte contenant une URL>
+// PANEL — avec fuzzy matching
+// ============================================================
+async function handlePanel(message, input) {
+  const raw = (input || "").trim().toLowerCase();
+
+  if (!raw) {
+    return message.reply(
+      `${EMOJI.no} Usage: \`.panel <code sniper | ap gift | nova visual>\`\n\n` +
+      `**Fuzzy matching supported** — tu peux aussi faire :\n` +
+      `• \`.panel sniper\` / \`.panel cs\` / \`.panel code\`\n` +
+      `• \`.panel ap\` / \`.panel gift\`\n` +
+      `• \`.panel nova\` / \`.panel visual\` / \`.panel vis\``
+    );
+  }
+
+  const panelKey = resolvePanel(raw);
+
+  if (!panelKey || !PANELS[panelKey]) {
+    return message.reply(
+      `${EMOJI.no} Panel inconnu : \`${input}\`\n` +
+      `Utilise : \`.panel code sniper\`, \`.panel ap gift\` ou \`.panel nova visual\`\n\n` +
+      `💡 Le bot comprend aussi les fautes de frappe (ex: \`.panel sniper\`, \`.panel vis\`, \`.panel cs\`).`
+    );
+  }
+
+  const panel = PANELS[panelKey];
+  const member = message.member;
+
+  const hasRole = member.roles.cache.has(panel.roleId);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${panel.emoji} ${panel.displayName} — Panel`)
+    .setColor(panel.color)
+    .setDescription(
+      panel.description +
+      "\n\n" +
+      (hasRole
+        ? "✅ You are **whitelisted**. Click the button below to receive your script in DM."
+        : `🔒 You need to be whitelisted or have the <@&${panel.roleId}> role to unlock this script.`)
+    )
+    .addFields(
+      { name: "🔐 Required Role", value: `<@&${panel.roleId}>`, inline: true },
+      { name: "📬 Delivery", value: "DM (private message)", inline: true }
+    )
+    .setFooter({ text: "SiteObfusque — Panel" })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`panel_get_${panelKey.replace(/\s+/g, "_")}`)
+      .setLabel("Get Script")
+      .setEmoji("📥")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  await message.channel.send({ embeds: [embed], components: [row] });
+}
+
+// ============================================================
+// WHITELIST — .w @user|id <sniper|AP|visual> (fuzzy)
+// ============================================================
+async function handleWhitelist(message, args) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+    return message.reply(`${EMOJI.no} You need \`Manage Roles\` permission.`);
+  }
+
+  if (args.length < 2) {
+    return message.reply(
+      `${EMOJI.no} Usage: \`.w @user|userID <sniper|AP|visual>\`\n\n` +
+      `Exemples:\n` +
+      `• \`.w @John sniper\`\n` +
+      `• \`.w 123456789012345678 visual\`\n` +
+      `• \`.w @John AP\``
+    );
+  }
+
+  const targetArg = args[0];
+  const roleArg = args.slice(1).join(" ").toLowerCase();
+
+  let targetId = null;
+  const mentionMatch = targetArg.match(/^<@!?(\d{17,20})>$/);
+  if (mentionMatch) {
+    targetId = mentionMatch[1];
+  } else if (/^\d{17,20}$/.test(targetArg)) {
+    targetId = targetArg;
+  }
+
+  if (!targetId) {
+    return message.reply(`${EMOJI.no} Mentionne un utilisateur ou donne son ID.`);
+  }
+
+  const panelKey = resolvePanel(roleArg);
+
+  if (!panelKey || !PANELS[panelKey]) {
+    return message.reply(
+      `${EMOJI.no} Rôle inconnu : \`${roleArg}\`\n` +
+      `Utilise : \`sniper\`, \`AP\` ou \`visual\` (fuzzy matching supporté).`
+    );
+  }
+
+  const panel = PANELS[panelKey];
+
+  let target;
+  try {
+    target = await message.guild.members.fetch(targetId);
+  } catch {
+    return message.reply(`${EMOJI.no} Utilisateur introuvable sur ce serveur.`);
+  }
+
+  if (!target) {
+    return message.reply(`${EMOJI.no} Utilisateur introuvable.`);
+  }
+
+  let role;
+  try {
+    role = await message.guild.roles.fetch(panel.roleId);
+  } catch {
+    return message.reply(`${EMOJI.no} Le rôle \`${panel.roleId}\` n'existe pas sur ce serveur.`);
+  }
+
+  if (!role) {
+    return message.reply(`${EMOJI.no} Le rôle \`${panel.roleId}\` est introuvable.`);
+  }
+
+  const botMember = message.guild.members.me;
+  if (role.position >= botMember.roles.highest.position) {
+    return message.reply(
+      `${EMOJI.no} Je ne peux pas attribuer ce rôle (il est au-dessus du mien dans la hiérarchie).`
+    );
+  }
+
+  try {
+    if (target.roles.cache.has(panel.roleId)) {
+      const embed = new EmbedBuilder()
+        .setTitle(`${EMOJI.yes} Already Whitelisted`)
+        .setColor(0xf59e0b)
+        .setDescription(
+          `<@${target.id}> a déjà le rôle <@&${panel.roleId}> (**${panel.displayName}**).`
+        );
+      return message.reply({ embeds: [embed] });
+    }
+
+    await target.roles.add(role);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${EMOJI.yes} Whitelist Successful`)
+      .setColor(0x22c55e)
+      .setDescription(
+        `<@${target.id}> a reçu le rôle <@&${panel.roleId}> (**${panel.displayName}**).`
+      )
+      .addFields(
+        { name: "👤 Membre", value: `<@${target.id}> (\`${target.id}\`)`, inline: true },
+        { name: "🎭 Rôle", value: `<@&${panel.roleId}>`, inline: true },
+        { name: "🛡️ Par", value: `<@${message.author.id}>`, inline: true }
+      )
+      .setFooter({ text: "SiteObfusque — Whitelist" })
+      .setTimestamp();
+
+    await message.reply({ embeds: [embed] });
+
+    target.send(
+      `${panel.emoji} You have been whitelisted for **${panel.displayName}**!\n` +
+      `Use \`.panel ${panelKey}\` in the server to get your script.`
+    ).catch(() => {});
+  } catch (e) {
+    console.error("[.w error]", e);
+    message.reply(`${EMOJI.no} Erreur lors de l'ajout du rôle : ${e.message}`);
+  }
+}
+
+// ============================================================
+// FETCH
 // ============================================================
 async function handleFetch(message, input) {
   input = (input || "").trim();
 
-  // Si rien n'est fourni, on regarde dans les pièces jointes / contenu brut
   if (!input) {
-    // Cherche une URL dans tout le message (au cas où)
     const urlInMessage = message.content.match(/https?:\/\/[^\s"'`)\]]+/i);
     if (urlInMessage) input = urlInMessage[0];
   }
@@ -320,24 +574,16 @@ async function handleFetch(message, input) {
     );
   }
 
-  // ============================================================
-  // EXTRACTION DE L'URL
-  // ============================================================
   let url = null;
 
-  // 1) Le plus courant : game:HttpGet("URL")
   const httpGetMatch = input.match(/HttpGet\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/i);
-  if (httpGetMatch) {
-    url = httpGetMatch[1];
-  }
+  if (httpGetMatch) url = httpGetMatch[1];
 
-  // 2) Sinon : n'importe quelle URL http(s) dans le texte
   if (!url) {
     const anyUrl = input.match(/https?:\/\/[^\s"'`)\]]+/i);
     if (anyUrl) url = anyUrl[0];
   }
 
-  // 3) Sinon : si l'input est déjà une URL propre
   if (!url) {
     const clean = input.replace(/["'`]/g, "").trim();
     if (/^https?:\/\/.+/i.test(clean)) url = clean;
@@ -347,7 +593,6 @@ async function handleFetch(message, input) {
     return message.reply(`${EMOJI.no} Aucune URL valide trouvée dans ton message.`);
   }
 
-  // Nettoyage final (enlève les caractères parasites en fin d'URL)
   url = url.replace(/[)\].,;:!?]+$/g, "").trim();
 
   if (!/^https?:\/\//i.test(url)) {
@@ -373,7 +618,6 @@ async function handleFetch(message, input) {
       return processing.edit(`${EMOJI.no} Le fichier est vide.`);
     }
 
-    // Détection du langage
     const lower = url.toLowerCase();
     let lang = "";
     if (lower.endsWith(".lua") || lower.endsWith(".luau")) lang = "lua";
@@ -385,10 +629,8 @@ async function handleFetch(message, input) {
     else if (lower.endsWith(".css")) lang = "css";
     else if (lower.endsWith(".txt")) lang = "";
 
-    // Limites Discord
     const MAX_EMBED = 3900;
 
-    // Si trop long → fichier attaché
     if (content.length > MAX_EMBED) {
       const buffer = Buffer.from(content, "utf-8");
 
@@ -407,13 +649,11 @@ async function handleFetch(message, input) {
           `📄 **${content.length} caractères** — trop long pour être affiché ici.\n` +
           `🔗 [Lien source](${url})`
         )
-        .addFields(
-          {
-            name: "🔗 URL extraite",
-            value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
-            inline: false,
-          }
-        )
+        .addFields({
+          name: "🔗 URL extraite",
+          value: `\`${url.length > 200 ? url.slice(0, 197) + "..." : url}\``,
+          inline: false,
+        })
         .setFooter({ text: "SiteObfusque — fetch" });
 
       const preview = content.slice(0, 500).replace(/```/g, "``\u200b`");
@@ -428,7 +668,6 @@ async function handleFetch(message, input) {
       return processing.edit({ content: "", embeds: [embed], files: [file] });
     }
 
-    // Sinon → embed direct
     const safeContent = content.replace(/```/g, "``\u200b`");
 
     const embed = new EmbedBuilder()
@@ -527,7 +766,7 @@ async function handleObf(message) {
 }
 
 // ============================================================
-// DEOBF (ClydeDeobf — restricted)
+// DEOBF
 // ============================================================
 async function handleDeobf(message) {
   if (message.author.id !== AUTHORIZED_DEOBF_ID) {
@@ -583,7 +822,7 @@ async function handleDeobf(message) {
 }
 
 // ============================================================
-// LOADER — .loader ["<key>"] + fichier
+// LOADER
 // ============================================================
 async function handleLoader(message, args) {
   if (!GITHUB_TOKEN) {
@@ -596,11 +835,8 @@ async function handleLoader(message, args) {
 
   if (raw.length > 0) {
     const keyMatch = raw.match(/^["'`](.+?)["'`]/);
-    if (keyMatch) {
-      key = keyMatch[1];
-    } else {
-      key = raw;
-    }
+    if (keyMatch) key = keyMatch[1];
+    else key = raw;
   }
 
   if (!key) {
@@ -728,7 +964,7 @@ async function handleLoader(message, args) {
 }
 
 // ============================================================
-// TEMPLATE DU LOADER (key system UI — version simplifiée)
+// TEMPLATE DU LOADER
 // ============================================================
 function buildLoaderTemplate({ keyHash, encodedUrl }) {
   return `--[[
@@ -740,11 +976,9 @@ function buildLoaderTemplate({ keyHash, encodedUrl }) {
     • Sinon → interface de saisie de clé
 ]]
 
--- ============ SECURITY CONSTANTS ============
 local KEY_HASH = ${keyHash}
 local ENC_URL  = "${encodedUrl}"
 
--- ============ BASE64 DECODE ============
 local function b64d(data)
     local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
     data = string.gsub(data, '[^'..b..'=]', '')
@@ -765,7 +999,6 @@ local function b64d(data)
     end))
 end
 
--- ============ DJB2 HASH (must match bot) ============
 local function djb2(s)
     local h = 5381
     for i = 1, #s do
@@ -774,7 +1007,6 @@ local function djb2(s)
     return h
 end
 
--- ============ PAYLOAD LOADER ============
 local function LoadPayload()
     local url = b64d(ENC_URL)
     local ok, src = pcall(function() return game:HttpGet(url) end)
@@ -795,7 +1027,6 @@ local function LoadPayload()
     return true
 end
 
--- ============ AUTO-LOAD IF KEY ALREADY VALID ============
 local storedKey = nil
 if getgenv then storedKey = getgenv().SiteObfusque_Key end
 
@@ -803,10 +1034,6 @@ if storedKey and storedKey ~= "" and djb2(storedKey) == KEY_HASH then
     LoadPayload()
     return
 end
-
--- ================================================================
--- KEY SYSTEM GUI (simplified — only key input + verify button)
--- ================================================================
 
 local Services = {
     Players = game:GetService("Players"),
@@ -818,12 +1045,7 @@ local Services = {
 local Player = Services.Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
-local Config = {
-    MaxKeyLength = 50,
-    AnimationSpeed = 0.4,
-    ParticleCount = 60,
-    ParticleSpeed = 60
-}
+local Config = { MaxKeyLength = 50, AnimationSpeed = 0.4, ParticleCount = 60, ParticleSpeed = 60 }
 
 local Colors = {
     Background = Color3.fromRGB(18, 18, 22),
@@ -842,16 +1064,9 @@ local Colors = {
 }
 
 local State = {
-    IsLoading = false,
-    Particles = {},
-    Animations = {},
-    IsDestroyed = false,
+    IsLoading = false, Particles = {}, Animations = {}, IsDestroyed = false,
     MousePosition = {X = 0, Y = 0},
-    FocusStates = {
-        InputFocused = false,
-        ButtonHovered = {},
-        AnimationsActive = true
-    }
+    FocusStates = { InputFocused = false, ButtonHovered = {}, AnimationsActive = true }
 }
 
 local UI = {}
@@ -864,7 +1079,6 @@ local function CreateMainGUI()
     screenGui.IgnoreGuiInset = true
     screenGui.DisplayOrder = 100
     screenGui.Parent = PlayerGui
-
     UI.ScreenGui = screenGui
     return screenGui
 end
@@ -878,7 +1092,6 @@ local function CreateBackdrop(parent)
     backdrop.BorderSizePixel = 0
     backdrop.ZIndex = 100
     backdrop.Parent = parent
-
     UI.Backdrop = backdrop
     return backdrop
 end
@@ -893,17 +1106,14 @@ local function CreateContainer(parent)
     container.ZIndex = 110
     container.Selectable = false
     container.Parent = parent
-
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 20)
     corner.Parent = container
-
     local stroke = Instance.new("UIStroke")
     stroke.Color = Colors.Border
     stroke.Thickness = 1
     stroke.Transparency = 0.3
     stroke.Parent = container
-
     UI.Container = container
     return container
 end
@@ -917,17 +1127,14 @@ local function CreateAnimatedBorder(parent)
     border.ZIndex = 109
     border.Selectable = false
     border.Parent = parent
-
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 23)
     corner.Parent = border
-
     local stroke = Instance.new("UIStroke")
     stroke.Color = Colors.NeonWhite
     stroke.Thickness = 2
     stroke.Transparency = 0.3
     stroke.Parent = border
-
     local gradient = Instance.new("UIGradient")
     gradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Colors.NeonWhite),
@@ -941,7 +1148,6 @@ local function CreateAnimatedBorder(parent)
         NumberSequenceKeypoint.new(1, 0.9)
     }
     gradient.Parent = stroke
-
     UI.AnimatedBorder = {Frame = border, Gradient = gradient, Stroke = stroke}
     return border
 end
@@ -954,7 +1160,6 @@ local function CreateHeader(parent)
     header.ZIndex = 11
     header.Selectable = false
     header.Parent = parent
-
     local iconContainer = Instance.new("Frame")
     iconContainer.Size = UDim2.new(0, 56, 0, 56)
     iconContainer.Position = UDim2.new(0.5, -28, 0, 24)
@@ -963,11 +1168,9 @@ local function CreateHeader(parent)
     iconContainer.ZIndex = 12
     iconContainer.Selectable = false
     iconContainer.Parent = header
-
     local iconCorner = Instance.new("UICorner")
     iconCorner.CornerRadius = UDim.new(0, 14)
     iconCorner.Parent = iconContainer
-
     local iconGlow = Instance.new("Frame")
     iconGlow.Size = UDim2.new(1, 12, 1, 12)
     iconGlow.Position = UDim2.new(0, -6, 0, -6)
@@ -975,17 +1178,14 @@ local function CreateHeader(parent)
     iconGlow.ZIndex = 11
     iconGlow.Selectable = false
     iconGlow.Parent = iconContainer
-
     local glowCorner = Instance.new("UICorner")
     glowCorner.CornerRadius = UDim.new(0, 20)
     glowCorner.Parent = iconGlow
-
     local glowStroke = Instance.new("UIStroke")
     glowStroke.Color = Colors.NeonWhite
     glowStroke.Thickness = 3
     glowStroke.Transparency = 0.2
     glowStroke.Parent = iconGlow
-
     local glowGradient = Instance.new("UIGradient")
     glowGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Colors.NeonWhite),
@@ -999,7 +1199,6 @@ local function CreateHeader(parent)
         NumberSequenceKeypoint.new(1, 0.8)
     }
     glowGradient.Parent = glowStroke
-
     local iconImage = Instance.new("ImageLabel")
     iconImage.Size = UDim2.new(0.8, 0, 0.8, 0)
     iconImage.Position = UDim2.new(0.1, 0, 0.1, 0)
@@ -1010,7 +1209,6 @@ local function CreateHeader(parent)
     iconImage.ScaleType = Enum.ScaleType.Fit
     iconImage.ZIndex = 13
     iconImage.Parent = iconContainer
-
     UI.Header = {Container = header, IconGlow = glowGradient, IconStroke = glowStroke}
     return header
 end
@@ -1024,7 +1222,6 @@ local function CreateContent(parent)
     content.ZIndex = 11
     content.Selectable = false
     content.Parent = parent
-
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 32)
     title.BackgroundTransparency = 1
@@ -1035,7 +1232,6 @@ local function CreateContent(parent)
     title.TextXAlignment = Enum.TextXAlignment.Center
     title.ZIndex = 12
     title.Parent = content
-
     local subtitle = Instance.new("TextLabel")
     subtitle.Size = UDim2.new(1, 0, 0, 40)
     subtitle.Position = UDim2.new(0, 0, 0, 40)
@@ -1048,7 +1244,6 @@ local function CreateContent(parent)
     subtitle.TextWrapped = true
     subtitle.ZIndex = 12
     subtitle.Parent = content
-
     UI.Content = content
     return content
 end
@@ -1061,7 +1256,6 @@ local function CreateInputSection(parent)
     section.ZIndex = 12
     section.Selectable = false
     section.Parent = parent
-
     local inputContainer = Instance.new("Frame")
     inputContainer.Size = UDim2.new(1, 0, 0, 52)
     inputContainer.BackgroundColor3 = Colors.Surface
@@ -1069,17 +1263,14 @@ local function CreateInputSection(parent)
     inputContainer.ZIndex = 13
     inputContainer.Selectable = false
     inputContainer.Parent = section
-
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = inputContainer
-
     local stroke = Instance.new("UIStroke")
     stroke.Color = Colors.Border
     stroke.Thickness = 1
     stroke.Transparency = 0.3
     stroke.Parent = inputContainer
-
     local inputGlow = Instance.new("Frame")
     inputGlow.Size = UDim2.new(1, 8, 1, 8)
     inputGlow.Position = UDim2.new(0, -4, 0, -4)
@@ -1088,17 +1279,14 @@ local function CreateInputSection(parent)
     inputGlow.Visible = false
     inputGlow.Selectable = false
     inputGlow.Parent = inputContainer
-
     local glowCorner = Instance.new("UICorner")
     glowCorner.CornerRadius = UDim.new(0, 16)
     glowCorner.Parent = inputGlow
-
     local glowStroke = Instance.new("UIStroke")
     glowStroke.Color = Colors.NeonWhite
     glowStroke.Thickness = 2
     glowStroke.Transparency = 0.3
     glowStroke.Parent = inputGlow
-
     local glowGradient = Instance.new("UIGradient")
     glowGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Colors.NeonWhite),
@@ -1112,7 +1300,6 @@ local function CreateInputSection(parent)
         NumberSequenceKeypoint.new(1, 0.8)
     }
     glowGradient.Parent = glowStroke
-
     local textInput = Instance.new("TextBox")
     textInput.Size = UDim2.new(1, -24, 1, 0)
     textInput.Position = UDim2.new(0, 12, 0, 0)
@@ -1128,7 +1315,6 @@ local function CreateInputSection(parent)
     textInput.ZIndex = 14
     textInput.Selectable = true
     textInput.Parent = inputContainer
-
     local charCounter = Instance.new("TextLabel")
     charCounter.Size = UDim2.new(0, 80, 0, 20)
     charCounter.Position = UDim2.new(1, -85, 0, 60)
@@ -1140,15 +1326,8 @@ local function CreateInputSection(parent)
     charCounter.TextXAlignment = Enum.TextXAlignment.Right
     charCounter.ZIndex = 13
     charCounter.Parent = section
-
-    UI.Input = {
-        Container = inputContainer,
-        TextBox = textInput,
-        Counter = charCounter,
-        Stroke = stroke,
-        Glow = {Frame = inputGlow, Stroke = glowStroke, Gradient = glowGradient}
-    }
-
+    UI.Input = { Container = inputContainer, TextBox = textInput, Counter = charCounter, Stroke = stroke,
+        Glow = {Frame = inputGlow, Stroke = glowStroke, Gradient = glowGradient} }
     return section
 end
 
@@ -1166,11 +1345,9 @@ local function CreateSubmitButton(parent)
     submitButton.ZIndex = 13
     submitButton.Selectable = true
     submitButton.Parent = parent
-
     local submitCorner = Instance.new("UICorner")
     submitCorner.CornerRadius = UDim.new(0, 12)
     submitCorner.Parent = submitButton
-
     local loadingContainer = Instance.new("Frame")
     loadingContainer.Size = UDim2.new(0, 24, 0, 24)
     loadingContainer.Position = UDim2.new(0.5, -12, 0, 12)
@@ -1179,7 +1356,6 @@ local function CreateSubmitButton(parent)
     loadingContainer.ZIndex = 14
     loadingContainer.Selectable = false
     loadingContainer.Parent = submitButton
-
     local spinner = Instance.new("Frame")
     spinner.Size = UDim2.new(1, 0, 1, 0)
     spinner.BackgroundColor3 = Colors.TextPrimary
@@ -1187,11 +1363,9 @@ local function CreateSubmitButton(parent)
     spinner.ZIndex = 15
     spinner.Selectable = false
     spinner.Parent = loadingContainer
-
     local spinnerCorner = Instance.new("UICorner")
     spinnerCorner.CornerRadius = UDim.new(1, 0)
     spinnerCorner.Parent = spinner
-
     local spinnerGradient = Instance.new("UIGradient")
     spinnerGradient.Transparency = NumberSequence.new{
         NumberSequenceKeypoint.new(0, 0),
@@ -1199,12 +1373,7 @@ local function CreateSubmitButton(parent)
         NumberSequenceKeypoint.new(1, 1)
     }
     spinnerGradient.Parent = spinner
-
-    UI.Buttons = {
-        Submit = submitButton,
-        Loading = {Container = loadingContainer, Spinner = spinner}
-    }
-
+    UI.Buttons = { Submit = submitButton, Loading = {Container = loadingContainer, Spinner = spinner} }
     return submitButton
 end
 
@@ -1216,7 +1385,6 @@ local function CreateStatus(parent)
     statusContainer.ZIndex = 12
     statusContainer.Selectable = false
     statusContainer.Parent = parent
-
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, 0, 1, 0)
     statusLabel.BackgroundTransparency = 1
@@ -1228,7 +1396,6 @@ local function CreateStatus(parent)
     statusLabel.TextWrapped = true
     statusLabel.ZIndex = 13
     statusLabel.Parent = statusContainer
-
     UI.Status = statusLabel
     return statusLabel
 end
@@ -1240,16 +1407,12 @@ local function CreateParticleContainer(parent)
     container.ZIndex = 105
     container.Selectable = false
     container.Parent = parent
-
     UI.ParticleContainer = container
     return container
 end
 
 local function CreateParticle()
-    if not UI.ParticleContainer or not UI.ParticleContainer.Parent or State.IsDestroyed then
-        return nil
-    end
-
+    if not UI.ParticleContainer or not UI.ParticleContainer.Parent or State.IsDestroyed then return nil end
     local size = math.random(8, 24)
     local particle = Instance.new("Frame")
     particle.Size = UDim2.new(0, size, 0, size)
@@ -1260,21 +1423,16 @@ local function CreateParticle()
     particle.ZIndex = 106
     particle.Selectable = false
     particle.Parent = UI.ParticleContainer
-
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(1, 0)
     corner.Parent = particle
-
     local gradient = Instance.new("UIGradient")
     local bubbleColors = {
-        Color3.fromRGB(200, 230, 255),
-        Color3.fromRGB(180, 220, 255),
-        Color3.fromRGB(220, 240, 255),
-        Color3.fromRGB(190, 210, 240)
+        Color3.fromRGB(200, 230, 255), Color3.fromRGB(180, 220, 255),
+        Color3.fromRGB(220, 240, 255), Color3.fromRGB(190, 210, 240)
     }
     local color1 = bubbleColors[math.random(#bubbleColors)]
     local color2 = bubbleColors[math.random(#bubbleColors)]
-
     gradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, color1),
         ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 255, 255)),
@@ -1283,7 +1441,6 @@ local function CreateParticle()
     }
     gradient.Rotation = math.random(0, 360)
     gradient.Parent = particle
-
     local highlight = Instance.new("Frame")
     highlight.Size = UDim2.new(0.3, 0, 0.3, 0)
     highlight.Position = UDim2.new(0.2, 0, 0.15, 0)
@@ -1292,11 +1449,9 @@ local function CreateParticle()
     highlight.BorderSizePixel = 0
     highlight.ZIndex = particle.ZIndex + 1
     highlight.Parent = particle
-
     local highlightCorner = Instance.new("UICorner")
     highlightCorner.CornerRadius = UDim.new(1, 0)
     highlightCorner.Parent = highlight
-
     local glow = Instance.new("Frame")
     glow.Size = UDim2.new(1.8, 0, 1.8, 0)
     glow.Position = UDim2.new(-0.4, 0, -0.4, 0)
@@ -1305,114 +1460,76 @@ local function CreateParticle()
     glow.BorderSizePixel = 0
     glow.ZIndex = particle.ZIndex - 1
     glow.Parent = particle
-
     local glowCorner = Instance.new("UICorner")
     glowCorner.CornerRadius = UDim.new(1, 0)
     glowCorner.Parent = glow
-
     local particleData = {
-        frame = particle,
-        vx = (math.random() - 0.5) * 0.004,
-        vy = -math.random(20, 50) / 10000,
-        created = tick(),
-        rotation = 0,
-        rotationSpeed = (math.random() - 0.5) * 2,
-        pulsePhase = math.random() * math.pi * 2,
-        driftPhase = math.random() * math.pi * 2,
-        originalTransparency = particle.BackgroundTransparency,
-        glow = glow,
-        highlight = highlight,
-        lifetime = math.random(30, 60),
-        originalSize = size,
-        wobblePhase = math.random() * math.pi * 2,
-        repelForce = {x = 0, y = 0},
-        mass = size / 10
+        frame = particle, vx = (math.random() - 0.5) * 0.004, vy = -math.random(20, 50) / 10000,
+        created = tick(), rotation = 0, rotationSpeed = (math.random() - 0.5) * 2,
+        pulsePhase = math.random() * math.pi * 2, driftPhase = math.random() * math.pi * 2,
+        originalTransparency = particle.BackgroundTransparency, glow = glow, highlight = highlight,
+        lifetime = math.random(30, 60), originalSize = size, wobblePhase = math.random() * math.pi * 2,
+        repelForce = {x = 0, y = 0}, mass = size / 10
     }
-
     table.insert(State.Particles, particleData)
     return particle
 end
 
 local function UpdateParticles()
     if State.IsDestroyed or not UI.ParticleContainer then return end
-
     local screenSize = UI.ScreenGui.AbsoluteSize
     local mouseScreenX = State.MousePosition.X / screenSize.X
     local mouseScreenY = State.MousePosition.Y / screenSize.Y
-
     for i = #State.Particles, 1, -1 do
         local p = State.Particles[i]
-
         if not p or not p.frame or not p.frame.Parent then
             table.remove(State.Particles, i)
         else
             local currentPos = p.frame.Position
             local age = tick() - p.created
-
             if currentPos.Y.Scale < -0.3 or age > p.lifetime then
                 p.frame:Destroy()
                 table.remove(State.Particles, i)
             else
                 local distanceToMouse = math.sqrt(
-                    (currentPos.X.Scale - mouseScreenX)^2 +
-                    (currentPos.Y.Scale - mouseScreenY)^2
-                )
-
+                    (currentPos.X.Scale - mouseScreenX)^2 + (currentPos.Y.Scale - mouseScreenY)^2)
                 local repelStrength = 0.08
                 local repelRadius = 0.15
                 local repelForceX = 0
                 local repelForceY = 0
-
                 if distanceToMouse < repelRadius and distanceToMouse > 0 then
                     local repelPower = (repelRadius - distanceToMouse) / repelRadius
                     repelPower = repelPower * repelStrength / p.mass
-
                     local directionX = (currentPos.X.Scale - mouseScreenX) / distanceToMouse
                     local directionY = (currentPos.Y.Scale - mouseScreenY) / distanceToMouse
-
                     repelForceX = directionX * repelPower
                     repelForceY = directionY * repelPower
                 end
-
                 p.repelForce.x = p.repelForce.x * 0.85 + repelForceX * 0.15
                 p.repelForce.y = p.repelForce.y * 0.85 + repelForceY * 0.15
-
                 local newX = currentPos.X.Scale + p.vx + p.repelForce.x
                 local newY = currentPos.Y.Scale + p.vy + p.repelForce.y
-
-                if newX <= -0.2 then newX = 1.2
-                elseif newX >= 1.2 then newX = -0.2 end
-
+                if newX <= -0.2 then newX = 1.2 elseif newX >= 1.2 then newX = -0.2 end
                 local wobbleTime = tick() * 1.5 + p.wobblePhase
                 newX = newX + math.sin(wobbleTime) * 0.002
                 newY = newY + math.cos(wobbleTime * 0.7) * 0.001
-
                 newX = newX + (math.random() - 0.5) * 0.0008
                 newY = newY + (math.random() - 0.5) * 0.0005
-
                 p.rotation = p.rotation + p.rotationSpeed
                 p.frame.Rotation = p.rotation
-
                 local breathe = math.sin(tick() * 2.5 + p.pulsePhase) * 0.1 + 1
                 local currentSize = p.originalSize * breathe
                 p.frame.Size = UDim2.new(0, currentSize, 0, currentSize)
-
                 local transparencyPulse = math.sin(tick() * 3 + p.pulsePhase) * 0.1
                 local newTransparency = math.max(0.5, math.min(0.95, p.originalTransparency + transparencyPulse))
                 p.frame.BackgroundTransparency = newTransparency
-
                 local glowIntensity = 0.9
-                if distanceToMouse < 0.2 then
-                    glowIntensity = 0.7 + (distanceToMouse / 0.2) * 0.2
-                end
+                if distanceToMouse < 0.2 then glowIntensity = 0.7 + (distanceToMouse / 0.2) * 0.2 end
                 p.glow.BackgroundTransparency = glowIntensity
-
                 local shimmer = math.sin(tick() * 4 + p.pulsePhase) * 0.2 + 0.3
                 p.highlight.BackgroundTransparency = shimmer
-
                 p.vx = p.vx * 0.995
                 p.vy = p.vy * 0.998
-
                 p.frame.Position = UDim2.new(newX, 0, newY, 0)
             end
         end
@@ -1428,17 +1545,14 @@ local function CreateButtonGlow(button, hoverColor, originalColor)
     glowBorder.Visible = false
     glowBorder.Selectable = false
     glowBorder.Parent = button
-
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 14)
     corner.Parent = glowBorder
-
     local stroke = Instance.new("UIStroke")
     stroke.Color = Colors.NeonWhite
     stroke.Thickness = 2
     stroke.Transparency = 0.3
     stroke.Parent = glowBorder
-
     local gradient = Instance.new("UIGradient")
     gradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Colors.NeonWhite),
@@ -1452,64 +1566,45 @@ local function CreateButtonGlow(button, hoverColor, originalColor)
         NumberSequenceKeypoint.new(1, 0.8)
     }
     gradient.Parent = stroke
-
     local currentTween = nil
     local buttonId = tostring(button)
-
     button.MouseEnter:Connect(function()
         State.FocusStates.ButtonHovered[buttonId] = true
         glowBorder.Visible = true
-
         Services.TweenService:Create(button, TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {BackgroundColor3 = hoverColor}):Play()
-
         Services.TweenService:Create(stroke, TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {Transparency = 0.1}):Play()
-
         if currentTween then currentTween:Cancel() end
         currentTween = Services.TweenService:Create(gradient,
             TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
             {Rotation = 360})
         currentTween:Play()
     end)
-
     button.MouseLeave:Connect(function()
         State.FocusStates.ButtonHovered[buttonId] = false
-
         Services.TweenService:Create(button, TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {BackgroundColor3 = originalColor}):Play()
-
         Services.TweenService:Create(stroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad),
             {Transparency = 0.8}):Play()
-
         if currentTween then
             currentTween:Cancel()
             gradient.Rotation = 0
         end
-
         task.spawn(function()
             task.wait(0.3)
-            if glowBorder and glowBorder.Parent then
-                glowBorder.Visible = false
-            end
+            if glowBorder and glowBorder.Parent then glowBorder.Visible = false end
         end)
     end)
-
     return {glowBorder, stroke, gradient}
 end
 
 local function ShowStatus(message, isError, isSuccess)
     if not UI.Status then return end
-
     UI.Status.Text = message
-    if isSuccess then
-        UI.Status.TextColor3 = Colors.Success
-    elseif isError then
-        UI.Status.TextColor3 = Colors.Error
-    else
-        UI.Status.TextColor3 = Colors.Warning
-    end
-
+    if isSuccess then UI.Status.TextColor3 = Colors.Success
+    elseif isError then UI.Status.TextColor3 = Colors.Error
+    else UI.Status.TextColor3 = Colors.Warning end
     UI.Status.TextTransparency = 1
     Services.TweenService:Create(UI.Status, TweenInfo.new(0.3, Enum.EasingStyle.Quad),
         {TextTransparency = 0}):Play()
@@ -1525,10 +1620,8 @@ end
 local function SetLoading(isLoading)
     State.IsLoading = isLoading
     if not UI.Buttons then return end
-
     UI.Buttons.Loading.Container.Visible = isLoading
     UI.Buttons.Submit.Text = isLoading and "" or "Verify Access Key"
-
     if isLoading then
         local tween = Services.TweenService:Create(UI.Buttons.Loading.Spinner,
             TweenInfo.new(1, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
@@ -1545,47 +1638,32 @@ end
 
 local function UpdateCharCounter()
     if not UI.Input then return end
-
     local currentLength = string.len(UI.Input.TextBox.Text)
     UI.Input.Counter.Text = currentLength .. "/" .. Config.MaxKeyLength
-
-    if currentLength >= Config.MaxKeyLength then
-        UI.Input.Counter.TextColor3 = Colors.Error
-    elseif currentLength >= Config.MaxKeyLength * 0.8 then
-        UI.Input.Counter.TextColor3 = Colors.Warning
-    else
-        UI.Input.Counter.TextColor3 = Colors.TextSecondary
-    end
+    if currentLength >= Config.MaxKeyLength then UI.Input.Counter.TextColor3 = Colors.Error
+    elseif currentLength >= Config.MaxKeyLength * 0.8 then UI.Input.Counter.TextColor3 = Colors.Warning
+    else UI.Input.Counter.TextColor3 = Colors.TextSecondary end
 end
 
 local function ValidateKey()
     if State.IsLoading then return end
-
     local key = UI.Input.TextBox.Text
     if key == "" then
         ShowStatus("Please enter an access key", true)
         UI.Input.TextBox:CaptureFocus()
         return
     end
-
     SetLoading(true)
     ShowStatus("Validating key...", false, false)
-
     task.spawn(function()
         task.wait(0.6)
-
         if djb2(key) == KEY_HASH then
             if getgenv then getgenv().SiteObfusque_Key = key end
-
             SetLoading(false)
             ShowStatus("Access granted! Loading...", false, true)
             task.wait(1)
-
             State.IsDestroyed = true
-            if UI.ScreenGui and UI.ScreenGui.Parent then
-                UI.ScreenGui:Destroy()
-            end
-
+            if UI.ScreenGui and UI.ScreenGui.Parent then UI.ScreenGui:Destroy() end
             LoadPayload()
         else
             SetLoading(false)
@@ -1601,33 +1679,25 @@ local function ConnectEvents()
             State.MousePosition.Y = input.Position.Y
         end
     end)
-
     UI.Input.TextBox:GetPropertyChangedSignal("Text"):Connect(function()
         local currentText = UI.Input.TextBox.Text
-
         if string.len(currentText) > Config.MaxKeyLength then
             UI.Input.TextBox.Text = string.sub(currentText, 1, Config.MaxKeyLength)
             ShowStatus("Maximum character limit reached (" .. Config.MaxKeyLength .. ")", true)
         end
-
         UpdateCharCounter()
         ClearStatus()
     end)
-
     local inputGlowTween = nil
-
     UI.Input.TextBox.Focused:Connect(function()
         State.FocusStates.InputFocused = true
         UI.Input.Glow.Frame.Visible = true
-
         Services.TweenService:Create(UI.Input.Stroke,
             TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {Color = Colors.NeonWhite, Transparency = 0.1}):Play()
-
         Services.TweenService:Create(UI.Input.Glow.Stroke,
             TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {Transparency = 0.1}):Play()
-
         if inputGlowTween then inputGlowTween:Cancel() end
         inputGlowTween = Services.TweenService:Create(UI.Input.Glow.Gradient,
             TweenInfo.new(2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
@@ -1636,24 +1706,19 @@ local function ConnectEvents()
         State.Animations.InputGlowTween = inputGlowTween
         ClearStatus()
     end)
-
     UI.Input.TextBox.FocusLost:Connect(function()
         State.FocusStates.InputFocused = false
-
         Services.TweenService:Create(UI.Input.Stroke,
             TweenInfo.new(0.2, Enum.EasingStyle.Quad),
             {Color = Colors.Border, Transparency = 0.3}):Play()
-
         Services.TweenService:Create(UI.Input.Glow.Stroke,
             TweenInfo.new(0.3, Enum.EasingStyle.Quad),
             {Transparency = 0.8}):Play()
-
         if inputGlowTween then
             inputGlowTween:Cancel()
             UI.Input.Glow.Gradient.Rotation = 0
             State.Animations.InputGlowTween = nil
         end
-
         task.spawn(function()
             task.wait(0.3)
             if UI.Input.Glow.Frame and UI.Input.Glow.Frame.Parent then
@@ -1661,15 +1726,12 @@ local function ConnectEvents()
             end
         end)
     end)
-
     Services.UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed or State.IsDestroyed then return end
-
         if input.KeyCode == Enum.KeyCode.Return and UI.Input.TextBox:IsFocused() then
             ValidateKey()
         end
     end)
-
     UI.Buttons.Submit.MouseButton1Click:Connect(function()
         ValidateKey()
     end)
@@ -1679,84 +1741,53 @@ local function StartAnimationLoops()
     State.Animations.BorderTween = nil
     State.Animations.IconTween = nil
     State.FocusStates.AnimationsActive = true
-
     task.spawn(function()
         for i = 1, 25 do
             if State.IsDestroyed then break end
             CreateParticle()
             task.wait(math.random(20, 100) / 1000)
         end
-
         while not State.IsDestroyed and UI.ScreenGui and UI.ScreenGui.Parent do
-            if #State.Particles < Config.ParticleCount then
-                CreateParticle()
-            end
+            if #State.Particles < Config.ParticleCount then CreateParticle() end
             task.wait(math.random(400, 1200) / 1000)
         end
     end)
-
     task.spawn(function()
         while not State.IsDestroyed and UI.ScreenGui and UI.ScreenGui.Parent do
             pcall(UpdateParticles)
             task.wait(1/Config.ParticleSpeed)
         end
     end)
-
     task.spawn(function()
         while not State.IsDestroyed and UI.AnimatedBorder and UI.AnimatedBorder.Frame.Parent do
-            if State.Animations.BorderTween then
-                State.Animations.BorderTween:Cancel()
-            end
-
+            if State.Animations.BorderTween then State.Animations.BorderTween:Cancel() end
             local startRotation = UI.AnimatedBorder.Gradient.Rotation
             local tween = Services.TweenService:Create(UI.AnimatedBorder.Gradient,
                 TweenInfo.new(4, Enum.EasingStyle.Linear),
                 {Rotation = startRotation + 360})
-
             State.Animations.BorderTween = tween
             tween:Play()
-
-            local success = pcall(function()
-                tween.Completed:Wait()
-            end)
-
-            if not success then
-                task.wait(4)
-            end
-
+            local success = pcall(function() tween.Completed:Wait() end)
+            if not success then task.wait(4) end
             if UI.AnimatedBorder and UI.AnimatedBorder.Gradient and UI.AnimatedBorder.Gradient.Parent then
                 UI.AnimatedBorder.Gradient.Rotation = UI.AnimatedBorder.Gradient.Rotation % 360
             end
-
             task.wait(0.1)
         end
     end)
-
     task.spawn(function()
         while not State.IsDestroyed and UI.Header and UI.Header.IconGlow and UI.Header.IconGlow.Parent do
-            if State.Animations.IconTween then
-                State.Animations.IconTween:Cancel()
-            end
-
+            if State.Animations.IconTween then State.Animations.IconTween:Cancel() end
             local startRotation = UI.Header.IconGlow.Rotation
             State.Animations.IconTween = Services.TweenService:Create(UI.Header.IconGlow,
                 TweenInfo.new(3, Enum.EasingStyle.Linear),
                 {Rotation = startRotation + 360})
-
             State.Animations.IconTween:Play()
-
-            local success = pcall(function()
-                State.Animations.IconTween.Completed:Wait()
-            end)
-
-            if not success then
-                task.wait(3)
-            end
-
+            local success = pcall(function() State.Animations.IconTween.Completed:Wait() end)
+            if not success then task.wait(3) end
             if UI.Header and UI.Header.IconGlow and UI.Header.IconGlow.Parent then
                 UI.Header.IconGlow.Rotation = UI.Header.IconGlow.Rotation % 360
             end
-
             task.wait(0.1)
         end
     end)
@@ -1766,17 +1797,13 @@ local function PlayEntranceAnimation()
     UI.Container.Size = UDim2.new(0, 0, 0, 0)
     UI.Container.BackgroundTransparency = 1
     UI.Backdrop.BackgroundTransparency = 1
-
     Services.TweenService:Create(UI.Backdrop,
         TweenInfo.new(0.3, Enum.EasingStyle.Quad),
         {BackgroundTransparency = 0.1}):Play()
-
     task.wait(0.1)
-
     Services.TweenService:Create(UI.Container,
         TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
         {Size = UDim2.new(0, 420, 0, 500), BackgroundTransparency = 0}):Play()
-
     task.wait(0.5)
     UI.Input.TextBox:CaptureFocus()
 end
@@ -1792,9 +1819,7 @@ local function Initialize()
     CreateInputSection(content)
     CreateSubmitButton(content)
     CreateStatus(content)
-
     CreateButtonGlow(UI.Buttons.Submit, Colors.HoverPrimary, Colors.Primary)
-
     UpdateCharCounter()
     ConnectEvents()
     StartAnimationLoops()
@@ -1819,11 +1844,7 @@ async function handleUpload(message) {
   }
 
   const filename = attachment.name.toLowerCase();
-  if (
-    !filename.endsWith(".lua") &&
-    !filename.endsWith(".luau") &&
-    !filename.endsWith(".txt")
-  ) {
+  if (!filename.endsWith(".lua") && !filename.endsWith(".luau") && !filename.endsWith(".txt")) {
     return message.reply(`${EMOJI.no} Supported: \`.lua\`, \`.luau\`, \`.txt\``);
   }
 
@@ -1946,9 +1967,7 @@ async function handleSetObfChannels(message, args) {
   }
 
   if (args.length < 1) {
-    return message.reply(
-      `${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``
-    );
+    return message.reply(`${EMOJI.no} Usage: \`.setobfchannels <channel-id1> [<channel-id2>]\``);
   }
 
   const ids = args.filter((a) => /^\d{17,20}$/.test(a));
@@ -1960,9 +1979,7 @@ async function handleSetObfChannels(message, args) {
   for (const id of ids) {
     try {
       const ch = await message.guild.channels.fetch(id);
-      if (ch && ch.type === ChannelType.GuildText) {
-        valid.push(ch.id);
-      }
+      if (ch && ch.type === ChannelType.GuildText) valid.push(ch.id);
     } catch {}
   }
 
@@ -1977,9 +1994,7 @@ async function handleSetObfChannels(message, args) {
   const embed = new EmbedBuilder()
     .setTitle(`${EMOJI.yes} Obfuscation Channels Set`)
     .setColor(0x22c55e)
-    .setDescription(
-      `\`.obf\` is now allowed in:\n` + valid.map((id) => `<#${id}>`).join("\n")
-    );
+    .setDescription(`\`.obf\` is now allowed in:\n` + valid.map((id) => `<#${id}>`).join("\n"));
 
   await message.reply({ embeds: [embed] });
 }
@@ -1994,9 +2009,7 @@ async function handleTicketPanel(message) {
 
   const cfg = loadConfig();
   if (!cfg.categoryId) {
-    return message.reply(
-      `${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``
-    );
+    return message.reply(`${EMOJI.no} Set the category first: \`.setcategoryticket <category-id>\``);
   }
 
   const embed = new EmbedBuilder()
@@ -2025,6 +2038,55 @@ async function handleTicketPanel(message) {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
+  // ---- Bouton Get Script des panels ----
+  if (interaction.customId.startsWith("panel_get_")) {
+    const panelKey = interaction.customId.replace("panel_get_", "").replace(/_/g, " ");
+    const panel = PANELS[panelKey];
+
+    if (!panel) {
+      return interaction.reply({ content: `${EMOJI.no} Panel introuvable.`, ephemeral: true });
+    }
+
+    // Vérifie que l'utilisateur a le rôle
+    const member = interaction.member;
+    if (!member.roles.cache.has(panel.roleId)) {
+      return interaction.reply({
+        content:
+          `${EMOJI.no} **You need to be whitelisted or have the <@&${panel.roleId}> role to unlock this script.**`,
+        ephemeral: true,
+      });
+    }
+
+    // Envoie le script en DM
+    try {
+      const dmEmbed = new EmbedBuilder()
+        .setTitle(`${panel.emoji} ${panel.displayName} — Script`)
+        .setColor(panel.color)
+        .setDescription(
+          "Here is your script. Copy and paste it into your executor.\n\n" +
+          "```lua\n" + panel.script + "\n```"
+        )
+        .setFooter({ text: "SiteObfusque — DM Delivery" })
+        .setTimestamp();
+
+      await interaction.user.send({ embeds: [dmEmbed] });
+
+      await interaction.reply({
+        content: `${EMOJI.yes} Script sent to your DM! Check your private messages.`,
+        ephemeral: true,
+      });
+    } catch (e) {
+      console.error("[panel DM error]", e);
+      await interaction.reply({
+        content:
+          `${EMOJI.no} I couldn't send you a DM. Please enable DMs from server members and try again.`,
+        ephemeral: true,
+      });
+    }
+    return;
+  }
+
+  // ---- Ticket create ----
   if (interaction.customId === "create_ticket") {
     try {
       await interaction.deferReply({ ephemeral: true });
@@ -2113,6 +2175,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ---- Ticket close ----
   if (interaction.customId === "close_ticket") {
     try {
       await interaction.reply(`${EMOJI.loading} Closing ticket in 5 seconds...`);
